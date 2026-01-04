@@ -2,12 +2,15 @@ services:
   - type: web
     name: elite-options-flow-web
     env: python
+    runtime: python
     rootDir: .
     plan: starter
     region: oregon
     buildCommand: "pip install -r requirements.txt"
     startCommand: "bash start_web.sh"
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: MASSIVE_API_KEY
         sync: false
       - key: SCAN_TICKERS
@@ -30,12 +33,15 @@ services:
   - type: worker
     name: elite-options-flow-worker
     env: python
+    runtime: python
     rootDir: .
     plan: starter
     region: oregon
     buildCommand: "pip install -r requirements.txt"
     startCommand: "bash start_worker.sh"
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: MASSIVE_API_KEY
         sync: false
       - key: SCAN_TICKERS
