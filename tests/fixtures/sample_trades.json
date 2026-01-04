@@ -1,0 +1,16 @@
+[
+  {
+    "option_symbol": "SPY240621C00450000",
+    "underlying": "SPY",
+    "trade_time": "2024-06-18T14:30:00Z",
+    "price": 1.5,
+    "size": 100
+  },
+  {
+    "option_symbol": "SPY240621C00450000",
+    "underlying": "SPY",
+    "trade_time": "2024-06-18T14:30:30Z",
+    "price": 1.6,
+    "size": 50
+  }
+]
