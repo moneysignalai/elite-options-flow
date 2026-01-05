@@ -17,8 +17,8 @@ def upgrade():
     bind = op.get_bind()
     insp = inspect(bind)
 
-    if "alerts" in insp.get_table_names():
-        logger.info("alerts table already exists; skipping creation")
+    if insp.has_table("alerts"):
+        print("alerts table already exists; skipping create")
         return
 
     op.create_table(
@@ -59,10 +59,9 @@ def upgrade():
 def downgrade():
     bind = op.get_bind()
     insp = inspect(bind)
-    tables = set(insp.get_table_names())
 
-    if 'dedupe_state' in tables:
+    if insp.has_table('dedupe_state'):
         op.drop_table('dedupe_state')
 
-    if 'alerts' in tables:
+    if insp.has_table('alerts'):
         op.drop_table('alerts')
