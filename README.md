@@ -128,6 +128,7 @@ python start_worker.sh  # scanner loop
   ```
 - If not set, alerts are stored in-memory (bounded deque) and dedupe uses local cache.
 - Render boot runs `alembic upgrade head` before starting services; keep migrations idempotent (e.g., use inspectors/exists checks) so repeated boots do not fail when tables are already present.
+- Operations note: if the alerts table already exists but Alembic was never stamped, run `PYTHONPATH=. alembic stamp head` once to mark the migration applied.
 
 ## API Endpoints
 - `GET /health`
