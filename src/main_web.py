@@ -99,9 +99,11 @@ async def force_alert(ticker: str, request: Request):
         return JSONResponse({"status": "suppressed", "reason": "no_contracts"})
     request_log = getattr(request.state, "logger", logger)
     option_symbol = contracts[0]
-    trades = massive_client.get_option_trades(option_symbol)
-    quotes = massive_client.get_option_quotes(option_symbol)
-    snapshot = massive_client.get_option_snapshot(option_symbol)
+    snapshot = massive_client.get_contract_snapshot(ticker, option_symbol)
+    if not snapshot or not snapshot.last_trade:
+        return JSONResponse({"status": "suppressed", "reason": "no_trades"})
+    trades = [snapshot.last_trade]
+    quotes = [snapshot.last_quote] if snapshot.last_quote else []
     labeled = matcher.label_aggression(trades, quotes)
     clusters = cluster_builder.build(labeled, snapshot)
     result = router.process_clusters(

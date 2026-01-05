@@ -60,3 +60,32 @@ def test_parses_ticker_list(mock_app_config):
     symbols = client.get_options_snapshot("AAPL")
 
     assert symbols == ["AAPL260116C00200000"]
+
+
+def test_contract_snapshot_parses_trade_and_quote(mock_app_config):
+    payload = {
+        "snapshot": {
+            "option_symbol": "AAPL260116C00200000",
+            "underlying": "AAPL",
+            "expiry": "2026-01-16",
+            "strike": 200,
+            "call_put": "C",
+            "last_trade": {
+                "price": 1.23,
+                "size": 50,
+                "timestamp": "2024-01-02T15:00:00Z",
+            },
+            "last_quote": {
+                "bid": 1.2,
+                "ask": 1.3,
+                "timestamp": "2024-01-02T14:59:59Z",
+            },
+        }
+    }
+    client = _snapshot_client(mock_app_config, payload)
+
+    snapshot = client.get_contract_snapshot("AAPL", "AAPL260116C00200000")
+
+    assert snapshot.option_symbol == "AAPL260116C00200000"
+    assert snapshot.last_trade and snapshot.last_trade.price == 1.23
+    assert snapshot.last_quote and snapshot.last_quote.ask == 1.3

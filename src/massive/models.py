@@ -1,6 +1,7 @@
 from datetime import datetime, date
-from pydantic import BaseModel
 from typing import List, Optional
+
+from pydantic import BaseModel
 
 
 class OptionTrade(BaseModel):
@@ -30,6 +31,87 @@ class OptionSnapshot(BaseModel):
     delta: Optional[float]
     gamma: Optional[float]
     underlying_price: Optional[float]
+    last_trade: Optional[OptionTrade] = None
+    last_quote: Optional[OptionQuote] = None
+
+    @staticmethod
+    def _parse_last_trade(data: dict, option_symbol: str, underlying: str) -> OptionTrade | None:
+        if not isinstance(data, dict):
+            return None
+        price = data.get("price") or data.get("last_price")
+        size = data.get("size") or data.get("quantity") or data.get("volume")
+        trade_time = data.get("timestamp") or data.get("time") or data.get("trade_time")
+        if price is None or size is None or trade_time is None:
+            return None
+        return OptionTrade(
+            option_symbol=option_symbol,
+            underlying=underlying,
+            trade_time=trade_time,
+            price=float(price),
+            size=float(size),
+            side=data.get("side"),
+        )
+
+    @staticmethod
+    def _parse_last_quote(data: dict, option_symbol: str) -> OptionQuote | None:
+        if not isinstance(data, dict):
+            return None
+        bid = data.get("bid") or data.get("bid_price")
+        ask = data.get("ask") or data.get("ask_price")
+        quote_time = data.get("timestamp") or data.get("time") or data.get("quote_time")
+        if bid is None or ask is None or quote_time is None:
+            return None
+        return OptionQuote(
+            option_symbol=option_symbol,
+            bid=float(bid),
+            ask=float(ask),
+            quote_time=quote_time,
+        )
+
+    @classmethod
+    def from_snapshot_payload(cls, payload: dict) -> "OptionSnapshot":
+        option_symbol = (
+            payload.get("option_symbol")
+            or payload.get("optionSymbol")
+            or payload.get("optionContract")
+            or payload.get("option_contract")
+            or payload.get("ticker")
+            or ""
+        )
+        underlying = (
+            payload.get("underlying")
+            or payload.get("underlying_symbol")
+            or payload.get("underlying_ticker")
+            or payload.get("underlyingAsset")
+            or payload.get("ticker_root")
+            or ""
+        )
+        expiry = payload.get("expiry") or payload.get("expiration") or payload.get("expiration_date")
+        strike = payload.get("strike") or payload.get("strike_price")
+        call_put = payload.get("call_put") or payload.get("type") or payload.get("option_type")
+        oi = payload.get("oi") or payload.get("open_interest")
+        iv = payload.get("iv") or payload.get("implied_volatility")
+        delta = payload.get("delta")
+        gamma = payload.get("gamma")
+        underlying_price = payload.get("underlying_price") or payload.get("underlyingPrice")
+
+        normalized = {
+            "option_symbol": option_symbol,
+            "underlying": underlying,
+            "expiry": expiry,
+            "strike": strike,
+            "call_put": (call_put or "").upper()[:1],
+            "oi": oi,
+            "iv": iv,
+            "delta": delta,
+            "gamma": gamma,
+            "underlying_price": underlying_price,
+        }
+
+        last_trade = cls._parse_last_trade(payload.get("last_trade"), option_symbol, underlying)
+        last_quote = cls._parse_last_quote(payload.get("last_quote"), option_symbol)
+
+        return cls(**normalized, last_trade=last_trade, last_quote=last_quote)
 
 
 class OptionContractReference(BaseModel):

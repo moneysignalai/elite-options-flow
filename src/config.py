@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import List
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -87,13 +88,15 @@ def load_config() -> AppConfig:
         trades_path=os.getenv(
             "MASSIVE_TRADES_PATH",
             os.getenv(
-                "MASSIVE_TRADES_PATH_TEMPLATE", "/options/trades?symbol={option_symbol}"
+                "MASSIVE_TRADES_PATH_TEMPLATE",
+                "/v3/snapshot/options/{underlying}/{option_symbol}",
             ),
         ),
         quotes_path=os.getenv(
             "MASSIVE_QUOTES_PATH",
             os.getenv(
-                "MASSIVE_QUOTES_PATH_TEMPLATE", "/options/quotes?symbol={option_symbol}"
+                "MASSIVE_QUOTES_PATH_TEMPLATE",
+                "/v3/snapshot/options/{underlying}/{option_symbol}",
             ),
         ),
         snapshot_path=os.getenv(
@@ -102,15 +105,18 @@ def load_config() -> AppConfig:
                 "MASSIVE_SNAPSHOT_PATH_TEMPLATE", "/v3/snapshot/options/{ticker}"
             ),
         ),
-        contract_search_path=os.getenv("MASSIVE_CONTRACT_SEARCH_PATH"),
+        contract_search_path=os.getenv(
+            "MASSIVE_CONTRACT_SEARCH_PATH",
+            os.getenv("MASSIVE_CONTRACT_SEARCH_PATH_TEMPLATE", "/v3/reference/options/contracts"),
+        ),
         contract_search_query=os.getenv("MASSIVE_CONTRACT_SEARCH_QUERY"),
         use_legacy_contract_search=_bool("MASSIVE_USE_LEGACY_CONTRACT_SEARCH", False),
         headers_mode=os.getenv("MASSIVE_HEADERS_MODE", "bearer"),
-        underlying_param_name=os.getenv("MASSIVE_UNDERLYING_PARAM_NAME", "symbol"),
+        underlying_param_name=os.getenv("MASSIVE_UNDERLYING_PARAM_NAME", "underlying_ticker"),
     )
     scan = ScanConfig(
         tickers=_list("SCAN_TICKERS"),
-        chain_discovery=os.getenv("CHAIN_DISCOVERY", "reference"),
+        chain_discovery=os.getenv("CHAIN_DISCOVERY", "snapshot"),
         enable_premarket=_bool("ENABLE_PREMARKET", False),
         enable_afterhours=_bool("ENABLE_AFTERHOURS", False),
         scan_interval_seconds=_int("SCAN_INTERVAL_SECONDS", 30),
@@ -156,6 +162,18 @@ def validate_config(config: AppConfig, logger) -> None:
 
         log_event(logger, "config_invalid", missing=missing)
         raise SystemExit(1)
+
+    ticker_pattern = re.compile(r"^[A-Z]{1,5}$")
+    invalid_tickers = [t for t in config.scan.tickers if not ticker_pattern.match(t)]
+    suspicious = [t for t in config.scan.tickers if t == "APPL"]
+    if invalid_tickers:
+        from src.utils.logging import log_event
+
+        log_event(logger, "scan_ticker_invalid", tickers=invalid_tickers)
+    if suspicious:
+        from src.utils.logging import log_event
+
+        log_event(logger, "scan_ticker_suspicious", tickers=suspicious, hint="did_you_mean_AAPL")
 
     if config.massive.use_legacy_contract_search and not config.massive.contract_search_path:
         from src.utils.logging import log_event
