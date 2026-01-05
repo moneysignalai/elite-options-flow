@@ -72,6 +72,77 @@ class OptionSnapshot(BaseModel):
         )
 
     @classmethod
+    def from_quotes_payload(cls, payload: dict, option_symbol: str, logger=None) -> "OptionSnapshot | None":
+        log = logger or get_logger("app")
+
+        if not isinstance(payload, dict):
+            log_event(log, "contract_snapshot_missing", option_symbol=option_symbol, reason="non_dict")
+            return None
+
+        parsed_symbol = parse_opra_symbol(option_symbol) if option_symbol else None
+        if not parsed_symbol:
+            log_event(log, "opra_parse_failed", option_symbol=option_symbol)
+            return None
+
+        underlying = (
+            payload.get("underlying")
+            or payload.get("underlying_symbol")
+            or payload.get("underlying_ticker")
+            or parsed_symbol.get("root", "")
+        )
+        expiry = payload.get("expiry") or payload.get("expiration") or payload.get("expiration_date")
+        strike = payload.get("strike") or payload.get("strike_price")
+        call_put = payload.get("call_put") or payload.get("type") or payload.get("option_type")
+
+        expiry = expiry or parsed_symbol.get("expiry")
+        strike = strike or parsed_symbol.get("strike")
+        call_put = (call_put or parsed_symbol.get("call_put") or "").upper()[:1]
+
+        iv = payload.get("iv") or payload.get("implied_volatility")
+        delta = payload.get("delta")
+        gamma = payload.get("gamma")
+        underlying_price = payload.get("underlying_price") or payload.get("underlyingPrice")
+
+        missing_fields = [name for name, value in (("expiry", expiry), ("strike", strike)) if value is None]
+        if missing_fields:
+            log_event(
+                log,
+                "contract_snapshot_missing_fields",
+                option_symbol=option_symbol,
+                missing_fields=missing_fields,
+                top_level_keys=list(payload.keys()),
+            )
+            return None
+
+        last_quote = cls._parse_last_quote(payload, option_symbol)
+        last_trade = cls._parse_last_trade(payload, option_symbol, underlying)
+
+        try:
+            return cls(
+                option_symbol=option_symbol,
+                underlying=underlying,
+                expiry=expiry,
+                strike=strike,
+                call_put=call_put,
+                oi=payload.get("oi") or payload.get("open_interest"),
+                iv=iv,
+                delta=delta,
+                gamma=gamma,
+                underlying_price=underlying_price,
+                last_trade=last_trade,
+                last_quote=last_quote,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                log,
+                "contract_snapshot_invalid",
+                option_symbol=option_symbol,
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+            )
+            return None
+
+    @classmethod
     def from_snapshot_payload(cls, payload: dict, logger=None) -> "OptionSnapshot | None":
         log = logger or get_logger("app")
         option_symbol = (
@@ -112,7 +183,7 @@ class OptionSnapshot(BaseModel):
         if missing_fields:
             log_event(
                 log,
-                "massive_quote_missing_fields",
+                "contract_snapshot_missing_fields",
                 option_symbol=option_symbol,
                 missing_fields=missing_fields,
                 top_level_keys=list(payload.keys()),
