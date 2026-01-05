@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from datetime import datetime
 
-from src.config import load_config
+from src.config import load_config, validate_config
 from src.storage.db import init_engine, get_session_factory
 from src.storage.repository import AlertRepository
 from src.messaging.telegram import TelegramMessenger
@@ -23,6 +23,7 @@ from src.utils.logging import get_logger, log_error, log_event, set_request_id
 
 logger = get_logger("web")
 config = load_config()
+validate_config(config, logger)
 
 # setup repo
 session_factory = None

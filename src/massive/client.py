@@ -1,4 +1,6 @@
 from typing import Any, Dict, List, Tuple
+from urllib.parse import parse_qsl
+
 import httpx
 
 from src.config import AppConfig
@@ -10,9 +12,30 @@ from src.utils.logging import get_logger, log_event
 class MassiveClient:
     def __init__(self, config: AppConfig, logger=None):
         self.cfg = config.massive
-        self.headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
+        self.headers = self._build_headers()
         self.client = httpx.Client(base_url=self.cfg.base_url, timeout=self.cfg.timeout)
         self.logger = logger or get_logger("app")
+
+    def _build_headers(self) -> Dict[str, str]:
+        if not self.cfg.api_key:
+            return {}
+
+        mode = (self.cfg.headers_mode or "bearer").lower()
+        if mode == "x-api-key":
+            return {"x-api-key": self.cfg.api_key}
+        return {"Authorization": f"Bearer {self.cfg.api_key}"}
+
+    def _build_contract_search_params(self, underlying: str, limit: int) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        if self.cfg.contract_search_query:
+            formatted = self.cfg.contract_search_query.format(
+                underlying=underlying, symbol=underlying, limit=limit
+            )
+            params.update(dict(parse_qsl(formatted, keep_blank_values=True)))
+
+        params.setdefault(self.cfg.underlying_param_name or "symbol", underlying)
+        params.setdefault("limit", limit)
+        return params
 
     @with_retries()
     def get_option_trades(self, option_symbol: str, params: Dict | None = None) -> List[models.OptionTrade]:
@@ -79,19 +102,39 @@ class MassiveClient:
     def search_contracts(self, underlying: str, limit: int = 20) -> List[models.OptionContractReference]:
         if not self.cfg.contract_search_path:
             return []
-        path = self.cfg.contract_search_path.format(underlying=underlying)
-        params = {"limit": limit}
-        response = self.client.get(path, headers=self.headers, params=params)
-        url = str(response.request.url)
+        path = self.cfg.contract_search_path.format(underlying=underlying, symbol=underlying)
+        params = self._build_contract_search_params(underlying, limit)
+        request = self.client.build_request("GET", path, headers=self.headers, params=params)
+        url = str(request.url)
         log_event(self.logger, "contract_search_request", ticker=underlying, url=url, params=params)
 
-        response.raise_for_status()
+        try:
+            response = self.client.send(request)
+            response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            status_code = None
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code
+            log_event(
+                self.logger,
+                "contract_search_failed",
+                ticker=underlying,
+                url=url,
+                params=params,
+                status_code=status_code,
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+            )
+            raise
+
         elapsed_ms = response.elapsed.total_seconds() * 1000 if response.elapsed else None
         content_type = response.headers.get("content-type")
 
         data = response.json()
         payload, top_keys, inferred_key = self._extract_contract_candidates(data)
         item_count_guess = len(payload)
+
+        contracts = self._parse_contract_references(payload)
 
         log_event(
             self.logger,
@@ -101,9 +144,8 @@ class MassiveClient:
             content_type=content_type,
             top_level_keys=top_keys,
             item_count_guess=item_count_guess,
+            parsed_count=len(contracts),
         )
-
-        contracts = self._parse_contract_references(payload)
 
         if not contracts:
             preview = (response.text or "")[:300]

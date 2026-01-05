@@ -60,13 +60,29 @@ tests/
   test_dedupe.py
 ```
 
-## Massive API endpoints
-Update the templates in `.env.example` with the correct paths for your Massive account:
-- `MASSIVE_TRADES_PATH_TEMPLATE`
-- `MASSIVE_QUOTES_PATH_TEMPLATE`
-- `MASSIVE_SNAPSHOT_PATH_TEMPLATE`
-- `MASSIVE_CONTRACT_SEARCH_PATH` (optional, used when `CHAIN_DISCOVERY=reference`)
-Only Massive Options API endpoints are called in v1.
+## Massive Setup
+The Massive client requires explicit configuration. These env vars are validated at startup for both worker and web:
+
+| Env var | Required | Description | Example |
+| --- | --- | --- | --- |
+| `MASSIVE_API_KEY` | ✅ | API key used for authentication (never logged). | `abc123` |
+| `MASSIVE_BASE_URL` | ✅ | Fully qualified Massive host (no default). | `https://api.your-massive-host.com` |
+| `MASSIVE_CONTRACT_SEARCH_PATH` | ✅ | Path for contract discovery endpoint. | `/v1/options/contracts` |
+| `MASSIVE_CONTRACT_SEARCH_QUERY` | Optional | Query template merged into contract searches. Supports `{symbol}`, `{underlying}`, `{limit}` substitutions. | `symbol={symbol}&limit={limit}` |
+| `MASSIVE_UNDERLYING_PARAM_NAME` | Optional | Query param name for underlying ticker. | `symbol` |
+| `MASSIVE_TRADES_PATH` | Optional | Trades path template. | `/options/trades?symbol={option_symbol}` |
+| `MASSIVE_QUOTES_PATH` | Optional | Quotes path template. | `/options/quotes?symbol={option_symbol}` |
+| `MASSIVE_SNAPSHOT_PATH` | Optional | Snapshot path template. | `/options/snapshot?symbol={option_symbol}` |
+| `MASSIVE_HEADERS_MODE` | Optional | Auth header style (`bearer` or `x-api-key`). | `bearer` |
+
+Only Massive Options API endpoints are called in v1. If you see a `404` from contract search, double-check `MASSIVE_BASE_URL` and `MASSIVE_CONTRACT_SEARCH_PATH`.
+
+To quickly validate configuration locally:
+```bash
+export $(cat .env | xargs)
+python scripts/massive_smoke_test.py
+```
+The smoke test calls contract search for `SPY` and exits `0` when contracts are returned.
 
 ## Environment Variables
 Copy `.env.example` to `.env` and fill in:

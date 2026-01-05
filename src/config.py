@@ -32,11 +32,14 @@ def _list(name: str, default: str = "") -> List[str]:
 @dataclass
 class MassiveConfig:
     api_key: str
-    base_url: str
+    base_url: str | None
     trades_path: str
     quotes_path: str
     snapshot_path: str
     contract_search_path: str | None
+    contract_search_query: str | None
+    headers_mode: str = "bearer"
+    underlying_param_name: str = "symbol"
     timeout: float = 10.0
 
 
@@ -79,11 +82,29 @@ class AppConfig:
 def load_config() -> AppConfig:
     massive = MassiveConfig(
         api_key=os.getenv("MASSIVE_API_KEY", ""),
-        base_url=os.getenv("MASSIVE_BASE_URL", "https://api.massive.com"),
-        trades_path=os.getenv("MASSIVE_TRADES_PATH_TEMPLATE", "/options/trades?symbol={option_symbol}"),
-        quotes_path=os.getenv("MASSIVE_QUOTES_PATH_TEMPLATE", "/options/quotes?symbol={option_symbol}"),
-        snapshot_path=os.getenv("MASSIVE_SNAPSHOT_PATH_TEMPLATE", "/options/snapshot?symbol={option_symbol}"),
+        base_url=os.getenv("MASSIVE_BASE_URL"),
+        trades_path=os.getenv(
+            "MASSIVE_TRADES_PATH",
+            os.getenv(
+                "MASSIVE_TRADES_PATH_TEMPLATE", "/options/trades?symbol={option_symbol}"
+            ),
+        ),
+        quotes_path=os.getenv(
+            "MASSIVE_QUOTES_PATH",
+            os.getenv(
+                "MASSIVE_QUOTES_PATH_TEMPLATE", "/options/quotes?symbol={option_symbol}"
+            ),
+        ),
+        snapshot_path=os.getenv(
+            "MASSIVE_SNAPSHOT_PATH",
+            os.getenv(
+                "MASSIVE_SNAPSHOT_PATH_TEMPLATE", "/options/snapshot?symbol={option_symbol}"
+            ),
+        ),
         contract_search_path=os.getenv("MASSIVE_CONTRACT_SEARCH_PATH"),
+        contract_search_query=os.getenv("MASSIVE_CONTRACT_SEARCH_QUERY"),
+        headers_mode=os.getenv("MASSIVE_HEADERS_MODE", "bearer"),
+        underlying_param_name=os.getenv("MASSIVE_UNDERLYING_PARAM_NAME", "symbol"),
     )
     scan = ScanConfig(
         tickers=_list("SCAN_TICKERS"),
@@ -115,3 +136,22 @@ def load_config() -> AppConfig:
         database_url=database_url if database_url else None,
         enable_postgres=_bool("ENABLE_POSTGRES", False),
     )
+
+
+def validate_config(config: AppConfig, logger) -> None:
+    missing = []
+    massive_env = {
+        "MASSIVE_API_KEY": config.massive.api_key,
+        "MASSIVE_BASE_URL": config.massive.base_url,
+        "MASSIVE_CONTRACT_SEARCH_PATH": config.massive.contract_search_path,
+    }
+
+    for key, value in massive_env.items():
+        if not value:
+            missing.append(key)
+
+    if missing:
+        from src.utils.logging import log_event
+
+        log_event(logger, "config_invalid", missing=missing)
+        raise SystemExit(1)
