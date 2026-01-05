@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from src.massive.opra import parse_opra_symbol
 from src.utils.logging import get_logger, log_event
+from src.massive.timestamp import normalize_timestamp_to_datetime
 
 
 class OptionTrade(BaseModel):
@@ -20,8 +21,9 @@ class OptionQuote(BaseModel):
     option_symbol: str
     bid: float
     ask: float
-    bid_size: Optional[float] = None
-    ask_size: Optional[float] = None
+    bid_size: int = 0
+    ask_size: int = 0
+    exchange: Optional[int] = None
     quote_time: datetime
 
 
@@ -61,24 +63,47 @@ class OptionSnapshot(BaseModel):
         )
 
     @staticmethod
-    def _parse_last_quote(data: dict, option_symbol: str) -> OptionQuote | None:
+    def _parse_last_quote(
+        data: dict, option_symbol: str
+    ) -> tuple[OptionQuote | None, str | None]:
         if not isinstance(data, dict):
-            return None
+            return None, "non_dict"
+
         bid = data.get("bid") or data.get("bid_price")
         ask = data.get("ask") or data.get("ask_price")
         bid_size = data.get("bid_size") or data.get("bidSize")
         ask_size = data.get("ask_size") or data.get("askSize")
-        quote_time = data.get("timestamp") or data.get("time") or data.get("quote_time")
-        if bid is None or ask is None or quote_time is None:
-            return None
-        return OptionQuote(
-            option_symbol=option_symbol,
-            bid=float(bid),
-            ask=float(ask),
-            bid_size=float(bid_size) if bid_size is not None else None,
-            ask_size=float(ask_size) if ask_size is not None else None,
-            quote_time=quote_time,
+        exchange = data.get("exchange") or data.get("exch")
+        raw_timestamp = (
+            data.get("sip_timestamp")
+            or data.get("timestamp")
+            or data.get("time")
+            or data.get("quote_time")
         )
+
+        if bid is None or ask is None or raw_timestamp is None:
+            return None, "missing_fields"
+
+        ts_dt = normalize_timestamp_to_datetime(raw_timestamp)
+        quote_time = ts_dt or raw_timestamp
+
+        try:
+            return (
+                OptionQuote(
+                    option_symbol=option_symbol,
+                    bid=float(bid),
+                    ask=float(ask),
+                    bid_size=int(bid_size) if bid_size is not None else 0,
+                    ask_size=int(ask_size) if ask_size is not None else 0,
+                    exchange=int(exchange) if exchange is not None else None,
+                    quote_time=quote_time,
+                ),
+                None,
+            )
+        except OverflowError:
+            return None, "timestamp_out_of_range"
+        except Exception:  # noqa: BLE001
+            return None, "type_error"
 
     @classmethod
     def from_quotes_payload(cls, payload: dict, option_symbol: str, logger=None) -> "OptionSnapshot | None":
@@ -125,9 +150,15 @@ class OptionSnapshot(BaseModel):
                 missing_fields=missing_fields,
                 top_level_keys=list(payload.keys()),
             )
+            log_event(
+                log,
+                "massive_quote_missing_fields",
+                option_symbol=option_symbol,
+                reason="missing_fields",
+            )
             return None
 
-        last_quote = cls._parse_last_quote(payload, option_symbol)
+        last_quote, _ = cls._parse_last_quote(payload, option_symbol)
         last_trade = cls._parse_last_trade(payload, option_symbol, underlying)
 
         try:
@@ -194,6 +225,10 @@ class OptionSnapshot(BaseModel):
         delta = payload.get("delta")
         gamma = payload.get("gamma")
         underlying_price = payload.get("underlying_price") or payload.get("underlyingPrice")
+        day = payload.get("day") or {}
+        day_volume = day.get("volume") if isinstance(day, dict) else payload.get("volume")
+        day_notional = day.get("notional") if isinstance(day, dict) else payload.get("notional")
+        day_vwap = day.get("vwap") if isinstance(day, dict) else payload.get("vwap")
 
         missing_fields = [name for name, value in (("expiry", expiry), ("strike", strike)) if value is None]
         if missing_fields:
@@ -203,6 +238,12 @@ class OptionSnapshot(BaseModel):
                 option_symbol=option_symbol,
                 missing_fields=missing_fields,
                 top_level_keys=list(payload.keys()),
+            )
+            log_event(
+                log,
+                "massive_quote_missing_fields",
+                option_symbol=option_symbol,
+                reason="missing_fields",
             )
             return None
 
@@ -223,7 +264,9 @@ class OptionSnapshot(BaseModel):
         }
 
         last_trade = cls._parse_last_trade(payload.get("last_trade"), option_symbol, underlying)
-        last_quote = cls._parse_last_quote(payload.get("last_quote"), option_symbol)
+        last_quote, reason = cls._parse_last_quote(payload.get("last_quote"), option_symbol)
+        if reason:
+            log_event(log, "massive_quote_missing_fields", option_symbol=option_symbol, reason=reason)
 
         try:
             return cls(**normalized, last_trade=last_trade, last_quote=last_quote)

@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 from urllib.parse import parse_qsl
@@ -22,6 +23,7 @@ class MassiveClient:
         self.headers = self._build_headers()
         self.client = httpx.Client(base_url=self.cfg.base_url, timeout=self.cfg.timeout)
         self.logger = logger or get_logger("app")
+        self._quote_parse_failures: dict[str, dict[str, float | int]] = {}
 
         if not self.cfg.api_key:
             log_event(self.logger, "config_invalid", missing=["MASSIVE_API_KEY"])
@@ -39,6 +41,20 @@ class MassiveClient:
         if mode == "x-api-key":
             return {"x-api-key": self.cfg.api_key}
         return {"Authorization": f"Bearer {self.cfg.api_key}"}
+
+    def _log_quote_parse_failure(self, symbol: str, entry: dict, reason: str | None) -> None:
+        tracker = self._quote_parse_failures.setdefault(symbol, {"count": 0, "last_log": 0.0})
+        tracker["count"] = int(tracker.get("count", 0)) + 1
+        now = time.time()
+        should_log = now - float(tracker.get("last_log", 0.0)) > 60 or tracker["count"] % 50 == 0
+        if should_log:
+            tracker["last_log"] = now
+            self.logger.warning(
+                "quote_parse_failed",
+                invalid_entry=entry,
+                reason=reason or "unknown",
+                failures=tracker["count"],
+            )
 
     def _response_preview(self, response: httpx.Response | None) -> str | None:
         if response is None:
@@ -299,11 +315,11 @@ class MassiveClient:
 
         quotes: List[models.OptionQuote] = []
         for entry in payload:
-            quote = models.OptionSnapshot._parse_last_quote(entry, options_ticker)
+            quote, reason = models.OptionSnapshot._parse_last_quote(entry, options_ticker)
             if quote:
                 quotes.append(quote)
             else:
-                self.logger.warning("quote_parse_failed", invalid_entry=entry)
+                self._log_quote_parse_failure(options_ticker, entry, reason)
 
         log_massive_response(
             self.logger,
