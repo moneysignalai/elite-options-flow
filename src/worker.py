@@ -34,9 +34,20 @@ def run_once(
         return {"clusters": 0, "sent": 0, "suppressed": 0}
     clusters_accum = []
     for option_symbol in contracts:
-        trades = client.get_option_trades(option_symbol)
-        quotes = client.get_option_quotes(option_symbol)
-        snapshot = client.get_option_snapshot(option_symbol)
+        snapshot = client.get_contract_snapshot(ticker, option_symbol)
+        if not snapshot:
+            log_event(log, "contract_snapshot_missing", ticker=ticker, option_symbol=option_symbol)
+            continue
+        trades = [snapshot.last_trade] if snapshot.last_trade else []
+        quotes = [snapshot.last_quote] if snapshot.last_quote else []
+        if not trades:
+            log_event(
+                log,
+                "no_trades_for_contract",
+                ticker=ticker,
+                option_symbol=option_symbol,
+            )
+            continue
         labeled = matcher.label_aggression(trades, quotes)
         clusters = cluster_builder.build(labeled, snapshot)
         clusters_accum.extend(clusters)

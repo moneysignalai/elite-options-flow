@@ -6,7 +6,13 @@ import httpx
 from src.config import AppConfig
 from src.massive import models
 from src.utils.retry import with_retries
-from src.utils.logging import get_logger, log_event
+from src.utils.logging import (
+    get_logger,
+    log_event,
+    log_massive_failure,
+    log_massive_request,
+    log_massive_response,
+)
 
 
 class MassiveClient:
@@ -42,7 +48,15 @@ class MassiveClient:
         if not isinstance(entry, dict):
             return None
 
-        for key in ("option_symbol", "optionSymbol", "ticker", "symbol"):
+        for key in (
+            "option_symbol",
+            "optionSymbol",
+            "ticker",
+            "symbol",
+            "optionContract",
+            "option_contract",
+            "optionContractId",
+        ):
             val = entry.get(key)
             if isinstance(val, str) and val:
                 return val
@@ -55,40 +69,6 @@ class MassiveClient:
                     return val
 
         return None
-
-    @with_retries()
-    def get_option_trades(self, option_symbol: str, params: Dict | None = None) -> List[models.OptionTrade]:
-        path = self.cfg.trades_path.format(option_symbol=option_symbol)
-        response = self.client.get(path, headers=self.headers, params=params or {})
-        response.raise_for_status()
-        data = response.json()
-        try:
-            return models.TradesResponse(**data).trades
-        except Exception as exc:  # noqa: BLE001
-            self.logger.exception(
-                "parse trades failed",
-                where="MassiveClient.get_option_trades",
-                exception_type=type(exc).__name__,
-                exception_message=str(exc),
-                payload_size=len(str(data)),
-            )
-            raise
-
-    @with_retries()
-    def get_option_quotes(self, option_symbol: str, params: Dict | None = None) -> List[models.OptionQuote]:
-        path = self.cfg.quotes_path.format(option_symbol=option_symbol)
-        response = self.client.get(path, headers=self.headers, params=params or {})
-        response.raise_for_status()
-        data = response.json()
-        return models.QuotesResponse(**data).quotes
-
-    @with_retries()
-    def get_option_snapshot(self, option_symbol: str) -> models.OptionSnapshot:
-        path = self.cfg.snapshot_path.format(option_symbol=option_symbol, ticker=option_symbol)
-        response = self.client.get(path, headers=self.headers)
-        response.raise_for_status()
-        data = response.json()
-        return models.SnapshotResponse(**data).snapshot
 
     @staticmethod
     def _extract_contract_candidates(data: Any) -> Tuple[List[dict], List[str], str | None]:
@@ -125,7 +105,7 @@ class MassiveClient:
         params = self._build_contract_search_params(underlying, limit)
         request = self.client.build_request("GET", path, headers=self.headers, params=params)
         url = str(request.url)
-        log_event(self.logger, "contract_search_request", ticker=underlying, url=url, params=params)
+        log_massive_request(self.logger, "GET", url, params=params, ticker=underlying)
 
         try:
             response = self.client.send(request)
@@ -134,15 +114,13 @@ class MassiveClient:
             status_code = None
             if isinstance(exc, httpx.HTTPStatusError):
                 status_code = exc.response.status_code
-            log_event(
+            log_massive_failure(
                 self.logger,
-                "contract_search_failed",
+                url,
+                params,
+                exc,
                 ticker=underlying,
-                url=url,
-                params=params,
                 status_code=status_code,
-                exception_type=type(exc).__name__,
-                exception_message=str(exc),
             )
             raise
 
@@ -151,18 +129,14 @@ class MassiveClient:
 
         data = response.json()
         payload, top_keys, inferred_key = self._extract_contract_candidates(data)
-        item_count_guess = len(payload)
-
         contracts = self._parse_contract_references(payload)
 
-        log_event(
+        log_massive_response(
             self.logger,
-            "contract_search_response",
             status_code=response.status_code,
             elapsed_ms=elapsed_ms,
             content_type=content_type,
             top_level_keys=top_keys,
-            item_count_guess=item_count_guess,
             parsed_count=len(contracts),
         )
 
@@ -190,31 +164,22 @@ class MassiveClient:
 
         request = self.client.build_request("GET", path, headers=self.headers, params=params)
         url = str(request.url)
-        log_event(
-            self.logger,
-            "options_snapshot_request",
-            ticker=underlying,
-            url=url,
-            params=params or None,
-        )
+        log_massive_request(self.logger, "GET", url, params=params or None, ticker=underlying)
 
         try:
             response = self.client.send(request)
             response.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            status_code = None
-            if isinstance(exc, httpx.HTTPStatusError):
-                status_code = exc.response.status_code
-            log_event(
+        except httpx.HTTPStatusError as exc:
+            log_massive_failure(
                 self.logger,
-                "options_snapshot_failed",
+                url,
+                params or None,
+                exc,
                 ticker=underlying,
-                url=url,
-                params=params or None,
-                status_code=status_code,
-                exception_type=type(exc).__name__,
-                exception_message=str(exc),
+                status_code=exc.response.status_code,
             )
+            if exc.response.status_code in {403, 404}:
+                return []
             raise
 
         elapsed_ms = response.elapsed.total_seconds() * 1000 if response.elapsed else None
@@ -229,15 +194,12 @@ class MassiveClient:
             if symbol:
                 symbols.append(symbol)
 
-        log_event(
+        log_massive_response(
             self.logger,
-            "options_snapshot_response",
-            ticker=underlying,
             status_code=response.status_code,
             elapsed_ms=elapsed_ms,
             content_type=content_type,
             top_level_keys=top_keys,
-            inferred_list_key=inferred_key,
             parsed_count=len(symbols),
         )
 
@@ -247,7 +209,81 @@ class MassiveClient:
                 "no_contracts_found",
                 ticker=underlying,
                 response_keys=top_keys,
+                inferred_list_key=inferred_key,
             )
             return []
 
         return symbols
+
+    @with_retries()
+    def get_contract_snapshot(self, underlying: str, option_symbol: str) -> models.OptionSnapshot | None:
+        path = self.cfg.trades_path.format(
+            option_symbol=option_symbol, underlying=underlying, ticker=underlying
+        )
+        request = self.client.build_request("GET", path, headers=self.headers)
+        url = str(request.url)
+        log_massive_request(
+            self.logger,
+            "GET",
+            url,
+            ticker=underlying,
+            option_contract=option_symbol,
+        )
+
+        try:
+            response = self.client.send(request)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            log_massive_failure(
+                self.logger,
+                url,
+                None,
+                exc,
+                ticker=underlying,
+                option_contract=option_symbol,
+                status_code=exc.response.status_code,
+            )
+            if exc.response.status_code in {403, 404}:
+                return None
+            raise
+
+        elapsed_ms = response.elapsed.total_seconds() * 1000 if response.elapsed else None
+        content_type = response.headers.get("content-type")
+        data = response.json()
+
+        payload = data.get("snapshot") or data.get("result") or data.get("data") or data
+        if isinstance(payload, list) and payload:
+            payload = payload[0]
+        if not isinstance(payload, dict):
+            log_event(
+                self.logger,
+                "contract_snapshot_empty",
+                ticker=underlying,
+                option_contract=option_symbol,
+                top_level_keys=list(data.keys()) if isinstance(data, dict) else None,
+            )
+            return None
+
+        try:
+            snapshot = models.OptionSnapshot.from_snapshot_payload(payload)
+        except Exception as exc:  # noqa: BLE001
+            log_massive_failure(
+                self.logger,
+                url,
+                None,
+                exc,
+                ticker=underlying,
+                option_contract=option_symbol,
+            )
+            return None
+
+        log_massive_response(
+            self.logger,
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            content_type=content_type,
+            top_level_keys=list(data.keys()) if isinstance(data, dict) else None,
+            parsed_count=1 if snapshot else 0,
+        )
+
+        return snapshot
