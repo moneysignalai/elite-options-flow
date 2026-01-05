@@ -63,6 +63,12 @@ class ScanConfig:
     deep_dive_threshold: float
     medium_threshold: float
     cooldown_minutes: int
+    alert_cooldown_seconds: int
+    cooldown_scope: str
+    allow_one_alert_per_ticker: bool
+    quotes_mode_score_penalty: float
+    quotes_mode_notional_cap: float
+    quotes_mode_require_min_oi: float
 
 
 @dataclass
@@ -126,6 +132,12 @@ def load_config() -> AppConfig:
         deep_dive_threshold=_float("DEEP_DIVE_THRESHOLD", 9.0),
         medium_threshold=_float("MEDIUM_THRESHOLD", 7.0),
         cooldown_minutes=_int("COOLDOWN_MINUTES", 30),
+        alert_cooldown_seconds=_int("ALERT_COOLDOWN_SECONDS", _int("COOLDOWN_MINUTES", 30) * 60),
+        cooldown_scope=os.getenv("COOLDOWN_SCOPE", "contract").lower(),
+        allow_one_alert_per_ticker=_bool("ALLOW_ONE_ALERT_PER_TICKER", False),
+        quotes_mode_score_penalty=_float("QUOTES_MODE_SCORE_PENALTY", 0.75),
+        quotes_mode_notional_cap=_float("QUOTES_MODE_NOTIONAL_CAP", 250000),
+        quotes_mode_require_min_oi=_float("QUOTES_MODE_REQUIRE_MIN_OI", 50),
     )
     telegram = TelegramConfig(
         bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),

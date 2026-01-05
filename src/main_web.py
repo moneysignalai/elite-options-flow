@@ -34,11 +34,17 @@ else:
     log_event(logger, "db_disabled")
 repo = AlertRepository(session_factory=session_factory, logger=logger)
 messenger = TelegramMessenger(config.telegram.bot_token, config.telegram.chat_id, logger=logger)
-cooldown = CooldownManager(config.scan.cooldown_minutes)
+cooldown = CooldownManager(
+    config.scan.alert_cooldown_seconds, scope=config.scan.cooldown_scope
+)
 massive_client = MassiveClient(config, logger=logger)
 discovery = ContractDiscovery(massive_client, config.scan.chain_discovery)
 matcher = TradeQuoteMatcher(config.scan.aggression_window_seconds)
-cluster_builder = ClusterBuilder(config.scan.cluster_window_seconds)
+cluster_builder = ClusterBuilder(
+    config.scan.cluster_window_seconds,
+    quotes_notional_cap=config.scan.quotes_mode_notional_cap,
+    quotes_min_oi=config.scan.quotes_mode_require_min_oi,
+)
 router = AlertRouter(repo, messenger, cooldown, config, logger=logger)
 
 app = FastAPI()

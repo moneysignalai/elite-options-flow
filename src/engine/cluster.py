@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from datetime import datetime, timedelta
 from typing import List
 from pydantic import BaseModel
 
@@ -25,11 +26,14 @@ class FlowCluster(BaseModel):
     otm_pct: float | None
     data_mode: str = "trades"
     source_reason: str | None = None
+    notional_basis: str = "trades"
 
 
 class ClusterBuilder:
-    def __init__(self, window_seconds: int):
+    def __init__(self, window_seconds: int, quotes_notional_cap: float = 250000, quotes_min_oi: float = 50):
         self.window = timedelta(seconds=window_seconds)
+        self.quotes_notional_cap = quotes_notional_cap
+        self.quotes_min_oi = quotes_min_oi
 
     def build(self, trades: List[OptionTrade], snapshot: OptionSnapshot) -> List[FlowCluster]:
         trades = sorted(trades, key=lambda t: t.trade_time)
@@ -79,6 +83,7 @@ class ClusterBuilder:
             otm_pct=otm_pct,
             data_mode="trades",
             source_reason="trade_prints",
+            notional_basis="trades",
         )
 
     def build_snapshot_cluster(
@@ -92,16 +97,37 @@ class ClusterBuilder:
         elif quotes:
             price_estimate = sum(q.bid + q.ask for q in quotes) / (2 * len(quotes))
 
-        contracts_total = snapshot.day_volume or snapshot.oi or 0
+        contracts_total = snapshot.day_volume or 0
+        notional_basis = "snapshot_day_volume" if contracts_total else None
+
+        if contracts_total == 0 and snapshot.oi:
+            contracts_total = snapshot.oi
+            notional_basis = "snapshot_oi"
+
+        if mode == "quotes_fallback":
+            # require some baseline liquidity when OI is known
+            if not contracts_total and snapshot.oi is not None and snapshot.oi < self.quotes_min_oi:
+                return None
+            if contracts_total and notional_basis == "snapshot_oi" and contracts_total < self.quotes_min_oi:
+                return None
+
         if contracts_total == 0 and quotes:
             size_hints = [q.bid_size or 0 for q in quotes] + [q.ask_size or 0 for q in quotes]
             contracts_total = max(size_hints) if any(size_hints) else 1
+            notional_basis = "quotes_estimate"
+
         if contracts_total == 0:
             return None
 
-        premium_total = (price_estimate or snapshot.day_vwap or 0) * contracts_total * 100
-        if premium_total == 0:
+        effective_price = price_estimate or snapshot.day_vwap or 0
+        if effective_price == 0:
             return None
+
+        premium_total = effective_price * contracts_total * 100
+        if notional_basis == "quotes_estimate":
+            premium_total = min(premium_total, self.quotes_notional_cap)
+            size_cap = self.quotes_notional_cap / max(effective_price * 100, 1)
+            contracts_total = min(contracts_total, size_cap)
 
         otm_pct = None
         if snapshot and snapshot.underlying_price:
@@ -138,4 +164,5 @@ class ClusterBuilder:
             otm_pct=otm_pct,
             data_mode=mode,
             source_reason=source_reason,
+            notional_basis=notional_basis or "snapshot_day_volume",
         )
