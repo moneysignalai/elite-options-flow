@@ -3,7 +3,6 @@ import logging
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
 
 revision = '0001'
 down_revision = None
@@ -15,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 def upgrade():
     bind = op.get_bind()
-    insp = inspect(bind)
+    insp = sa.inspect(bind)
 
-    if insp.has_table("alerts"):
-        print("alerts table already exists; skipping create")
+    if _alerts_table_exists(insp):
+        print("alerts table already exists; skipping create_table")
         return
 
     op.create_table(
@@ -58,10 +57,16 @@ def upgrade():
 
 def downgrade():
     bind = op.get_bind()
-    insp = inspect(bind)
+    insp = sa.inspect(bind)
 
-    if insp.has_table('dedupe_state'):
+    if _alerts_table_exists(insp):
+        op.drop_table('alerts')
+
+    if insp.has_table('dedupe_state') or insp.has_table('dedupe_state', schema='public'):
         op.drop_table('dedupe_state')
 
-    if insp.has_table('alerts'):
-        op.drop_table('alerts')
+
+def _alerts_table_exists(insp) -> bool:
+    """Return True if the alerts table exists in default or public schema."""
+
+    return insp.has_table("alerts") or insp.has_table("alerts", schema="public")

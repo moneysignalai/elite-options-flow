@@ -396,9 +396,43 @@ class MassiveClient:
             return None
 
         payload = data.get("snapshot") or data.get("result") or data.get("data") or data
-        if isinstance(payload, list) and payload:
-            payload = payload[0]
-        if not isinstance(payload, dict):
+        primary_payload = payload[0] if isinstance(payload, list) and payload else payload
+
+        snapshot_payload: dict | None = None
+        mode = None
+
+        if isinstance(primary_payload, dict) and set(primary_payload.keys()).intersection(
+            {"details", "last_quote", "day", "greeks"}
+        ):
+            snapshot_payload = primary_payload
+            mode = "snapshot"
+        else:
+            candidate = None
+            if isinstance(data, dict) and "results" in data:
+                results = data.get("results") or []
+                if isinstance(results, list) and results:
+                    candidate = results[0]
+                elif isinstance(results, dict):
+                    candidate = results
+            if candidate is None:
+                if isinstance(primary_payload, list) and primary_payload:
+                    candidate = primary_payload[0]
+                elif isinstance(primary_payload, dict):
+                    candidate = primary_payload
+                elif isinstance(data, list) and data:
+                    candidate = data[0]
+
+            snapshot_payload = candidate if isinstance(candidate, dict) else None
+            mode = "quotes"
+
+        log_event(
+            self.logger,
+            "contract_snapshot_parse_mode",
+            option_contract=option_symbol,
+            mode=mode,
+        )
+
+        if snapshot_payload is None:
             top_level_keys = list(data.keys()) if isinstance(data, dict) else None
             log_event(
                 self.logger,
@@ -415,14 +449,20 @@ class MassiveClient:
             )
             return None
 
-        snapshot = models.OptionSnapshot.from_snapshot_payload(payload, logger=self.logger)
+        snapshot = (
+            models.OptionSnapshot.from_snapshot_payload(snapshot_payload, logger=self.logger)
+            if mode == "snapshot"
+            else models.OptionSnapshot.from_quotes_payload(
+                snapshot_payload, option_symbol, logger=self.logger
+            )
+        )
         if snapshot is None:
             log_event(
                 self.logger,
                 "contract_snapshot_missing",
                 ticker=underlying,
                 option_contract=option_symbol,
-                top_level_keys=list(payload.keys()),
+                top_level_keys=list(snapshot_payload.keys()),
             )
             return None
 

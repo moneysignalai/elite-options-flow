@@ -89,3 +89,25 @@ def test_contract_snapshot_parses_trade_and_quote(mock_app_config):
     assert snapshot.option_symbol == "AAPL260116C00200000"
     assert snapshot.last_trade and snapshot.last_trade.price == 1.23
     assert snapshot.last_quote and snapshot.last_quote.ask == 1.3
+
+
+def test_contract_snapshot_parses_quote_payload(mock_app_config):
+    option_symbol = "O:AAPL240119C00180000"
+    payload = {
+        "results": [
+            {
+                "bid": 1.1,
+                "ask": 1.2,
+                "timestamp": "2024-01-02T15:00:00Z",
+            }
+        ]
+    }
+    client = _snapshot_client(mock_app_config, payload)
+
+    snapshot = client.get_contract_snapshot("AAPL", option_symbol)
+
+    assert snapshot is not None
+    assert str(snapshot.expiry) == "2024-01-19"
+    assert snapshot.strike == 180.0
+    assert snapshot.call_put == "C"
+    assert snapshot.last_quote and snapshot.last_quote.ask == 1.2
