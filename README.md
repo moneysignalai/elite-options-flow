@@ -113,6 +113,8 @@ Cooldown and quotes fallback controls:
 Readable console logs (instead of JSON):
 ```bash
 LOG_FORMAT=console LOG_LEVEL=INFO python -m src.worker
+# or enable debug details
+# LOG_FORMAT=console LOG_LEVEL=DEBUG python -m src.worker
 ```
 
 ## Contract Discovery Modes
