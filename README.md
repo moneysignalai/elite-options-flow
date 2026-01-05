@@ -127,6 +127,7 @@ python start_worker.sh  # scanner loop
   DATABASE_URL=... alembic upgrade head
   ```
 - If not set, alerts are stored in-memory (bounded deque) and dedupe uses local cache.
+- Render boot runs `alembic upgrade head` before starting services; keep migrations idempotent (e.g., use inspectors/exists checks) so repeated boots do not fail when tables are already present.
 
 ## API Endpoints
 - `GET /health`
