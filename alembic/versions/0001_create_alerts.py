@@ -1,13 +1,26 @@
 """create alerts tables"""
+import logging
+
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 revision = '0001'
 down_revision = None
 branch_labels = None
 depends_on = None
 
+logger = logging.getLogger(__name__)
+
+
 def upgrade():
+    bind = op.get_bind()
+    insp = inspect(bind)
+
+    if "alerts" in insp.get_table_names():
+        logger.info("alerts table already exists; skipping creation")
+        return
+
     op.create_table(
         'alerts',
         sa.Column('id', sa.Integer, primary_key=True),
@@ -44,5 +57,12 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_table('dedupe_state')
-    op.drop_table('alerts')
+    bind = op.get_bind()
+    insp = inspect(bind)
+    tables = set(insp.get_table_names())
+
+    if 'dedupe_state' in tables:
+        op.drop_table('dedupe_state')
+
+    if 'alerts' in tables:
+        op.drop_table('alerts')
