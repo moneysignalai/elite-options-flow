@@ -39,7 +39,8 @@ def _add_contextvars(_: structlog.types.WrappedLogger, __: str, event_dict: dict
 
 
 def _add_base_fields(logger: structlog.types.WrappedLogger, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
-    event_dict.setdefault("service", logger._context.get("service", "app"))  # type: ignore[attr-defined]
+    context = getattr(logger, "_context", {}) or {}
+    event_dict.setdefault("service", context.get("service", "app"))
     event_dict.setdefault("env", _environment())
     event_dict.setdefault("git_sha", _git_sha())
     return event_dict
@@ -95,10 +96,15 @@ def set_alert_id(alert_id: Optional[str]) -> None:
         _alert_id_ctx.set(alert_id)
 
 
+def log_event(logger: structlog.stdlib.BoundLogger, event_name: str, **fields: Any) -> None:
+    """Log a structured info event with the given name and fields."""
+
+    logger.info(event_name, **fields)
+
+
 def log_error(log: structlog.stdlib.BoundLogger, where: str, error: Exception) -> None:
     log.exception(
         "error",
-        event="error",
         where=where,
         exception_type=type(error).__name__,
         exception_message=str(error),

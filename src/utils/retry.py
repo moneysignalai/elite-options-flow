@@ -18,7 +18,6 @@ def with_retries(retries: int = 2, backoff: float = 1.5):
                     if attempt > retries:
                         log.exception(
                             "operation failed",
-                            event="error",
                             where=func.__name__,
                             exception_type=type(exc).__name__,
                             exception_message=str(exc),
@@ -27,7 +26,6 @@ def with_retries(retries: int = 2, backoff: float = 1.5):
                     sleep_for = backoff ** attempt
                     log.warning(
                         "retrying",
-                        event="retrying",
                         attempt=attempt,
                         sleep=sleep_for,
                         func=func.__name__,
