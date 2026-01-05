@@ -12,4 +12,6 @@ class ContractDiscovery:
     def contracts_for(self, underlying: str) -> List[str]:
         if self.mode == "static":
             return self.static_contracts.get(underlying, [])
-        return [c.option_symbol for c in self.client.search_contracts(underlying)]
+        if getattr(self.client.cfg, "use_legacy_contract_search", False):
+            return [c.option_symbol for c in self.client.search_contracts(underlying)]
+        return self.client.get_options_snapshot(underlying)

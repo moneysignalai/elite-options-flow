@@ -38,6 +38,7 @@ class MassiveConfig:
     snapshot_path: str
     contract_search_path: str | None
     contract_search_query: str | None
+    use_legacy_contract_search: bool
     headers_mode: str = "bearer"
     underlying_param_name: str = "symbol"
     timeout: float = 10.0
@@ -82,7 +83,7 @@ class AppConfig:
 def load_config() -> AppConfig:
     massive = MassiveConfig(
         api_key=os.getenv("MASSIVE_API_KEY", ""),
-        base_url=os.getenv("MASSIVE_BASE_URL"),
+        base_url=os.getenv("MASSIVE_BASE_URL", "https://api.massive.com"),
         trades_path=os.getenv(
             "MASSIVE_TRADES_PATH",
             os.getenv(
@@ -98,11 +99,12 @@ def load_config() -> AppConfig:
         snapshot_path=os.getenv(
             "MASSIVE_SNAPSHOT_PATH",
             os.getenv(
-                "MASSIVE_SNAPSHOT_PATH_TEMPLATE", "/options/snapshot?symbol={option_symbol}"
+                "MASSIVE_SNAPSHOT_PATH_TEMPLATE", "/v3/snapshot/options/{ticker}"
             ),
         ),
         contract_search_path=os.getenv("MASSIVE_CONTRACT_SEARCH_PATH"),
         contract_search_query=os.getenv("MASSIVE_CONTRACT_SEARCH_QUERY"),
+        use_legacy_contract_search=_bool("MASSIVE_USE_LEGACY_CONTRACT_SEARCH", False),
         headers_mode=os.getenv("MASSIVE_HEADERS_MODE", "bearer"),
         underlying_param_name=os.getenv("MASSIVE_UNDERLYING_PARAM_NAME", "symbol"),
     )
@@ -143,7 +145,6 @@ def validate_config(config: AppConfig, logger) -> None:
     massive_env = {
         "MASSIVE_API_KEY": config.massive.api_key,
         "MASSIVE_BASE_URL": config.massive.base_url,
-        "MASSIVE_CONTRACT_SEARCH_PATH": config.massive.contract_search_path,
     }
 
     for key, value in massive_env.items():
@@ -154,4 +155,10 @@ def validate_config(config: AppConfig, logger) -> None:
         from src.utils.logging import log_event
 
         log_event(logger, "config_invalid", missing=missing)
+        raise SystemExit(1)
+
+    if config.massive.use_legacy_contract_search and not config.massive.contract_search_path:
+        from src.utils.logging import log_event
+
+        log_event(logger, "config_invalid", missing=["MASSIVE_CONTRACT_SEARCH_PATH"])
         raise SystemExit(1)
