@@ -1,5 +1,4 @@
 from typing import List
-from loguru import logger
 
 from src.massive.client import MassiveClient
 

@@ -1,6 +1,5 @@
 from datetime import timedelta
 from typing import Dict, List
-from loguru import logger
 
 from src.massive.models import OptionTrade, OptionQuote
 

@@ -1,17 +1,18 @@
 from typing import Dict, List
 import httpx
-from loguru import logger
 
 from src.config import AppConfig
 from src.massive import models
 from src.utils.retry import with_retries
+from src.utils.logging import get_logger
 
 
 class MassiveClient:
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, logger=None):
         self.cfg = config.massive
         self.headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
         self.client = httpx.Client(base_url=self.cfg.base_url, timeout=self.cfg.timeout)
+        self.logger = logger or get_logger("app")
 
     @with_retries()
     def get_option_trades(self, option_symbol: str, params: Dict | None = None) -> List[models.OptionTrade]:
@@ -22,7 +23,14 @@ class MassiveClient:
         try:
             return models.TradesResponse(**data).trades
         except Exception as exc:  # noqa: BLE001
-            logger.exception("parse trades failed", error=str(exc), payload=data)
+            self.logger.exception(
+                "parse trades failed",
+                event="error",
+                where="MassiveClient.get_option_trades",
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+                payload_size=len(str(data)),
+            )
             raise
 
     @with_retries()

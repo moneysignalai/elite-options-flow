@@ -14,7 +14,8 @@ class DummyCluster:
 def test_cooldown():
     manager = CooldownManager(cooldown_minutes=60)
     cluster = DummyCluster()
-    suppress, reason = manager.should_suppress(cluster, 5)
+    suppress, reason, remaining = manager.should_suppress(cluster, 5)
     assert suppress is False
-    suppress, reason = manager.should_suppress(cluster, 5)
+    suppress, reason, remaining = manager.should_suppress(cluster, 5)
     assert suppress is True
+    assert remaining is not None
