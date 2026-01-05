@@ -67,7 +67,7 @@ class AlertRouter:
 
             qualifying += 1
 
-            if sent_for_ticker is False and self.config.scan.allow_one_alert_per_ticker:
+            if sent_for_ticker and self.config.scan.allow_one_alert_per_ticker:
                 evaluation_log.info(
                     "alert suppressed",
                     decision="suppress",

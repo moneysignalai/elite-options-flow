@@ -49,14 +49,14 @@ def run_once(
         trades = client.get_option_trades(option_symbol, start_window, now)
         quotes = [snapshot.last_quote] if snapshot.last_quote else []
         has_snapshot_signal = bool(snapshot.last_trade or snapshot.day_volume or snapshot.oi)
-        mode = "trades" if trades else "snapshot" if has_snapshot_signal else "quotes_fallback"
+        mode = "trades" if trades else "quotes_fallback"
         reason = (
             "trade_endpoint"
             if trades
-            else "snapshot_last_trade" if snapshot.last_trade else "snapshot_liquidity" if has_snapshot_signal else "no_trades_available"
+            else "snapshot_last_trade"
+            if snapshot.last_trade
+            else "snapshot_liquidity" if has_snapshot_signal else "no_trades_available"
         )
-        if not trades and snapshot.last_trade:
-            trades = [snapshot.last_trade]
         if not quotes:
             quotes = client.get_option_quotes(option_symbol)
         log_event(

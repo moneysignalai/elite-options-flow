@@ -185,7 +185,7 @@ def test_snapshot_fallback_uses_volume():
     result = run_once("TEST", client, discovery, matcher, cluster_builder, router, config, StubLogger())
 
     assert result["sent"] == 1
-    assert messenger.sent[0]["mode"] == "snapshot"
+    assert messenger.sent[0]["mode"] == "quotes_fallback"
     assert messenger.sent[0]["score"] > 0
 
 

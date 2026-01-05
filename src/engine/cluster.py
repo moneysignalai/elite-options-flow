@@ -97,18 +97,16 @@ class ClusterBuilder:
         elif quotes:
             price_estimate = sum(q.bid + q.ask for q in quotes) / (2 * len(quotes))
 
-        contracts_total = snapshot.day_volume or 0
-        notional_basis = "snapshot_day_volume" if contracts_total else None
+        contracts_total = 0 if mode == "quotes_fallback" else snapshot.day_volume or 0
+        notional_basis = None if mode == "quotes_fallback" else "snapshot_day_volume" if contracts_total else None
 
-        if contracts_total == 0 and snapshot.oi:
+        if contracts_total == 0 and snapshot.oi and mode != "quotes_fallback":
             contracts_total = snapshot.oi
             notional_basis = "snapshot_oi"
 
         if mode == "quotes_fallback":
             # require some baseline liquidity when OI is known
-            if not contracts_total and snapshot.oi is not None and snapshot.oi < self.quotes_min_oi:
-                return None
-            if contracts_total and notional_basis == "snapshot_oi" and contracts_total < self.quotes_min_oi:
+            if snapshot.oi is not None and snapshot.oi < self.quotes_min_oi:
                 return None
 
         if contracts_total == 0 and quotes:

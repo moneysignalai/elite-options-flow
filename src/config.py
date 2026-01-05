@@ -115,6 +115,10 @@ def load_config() -> AppConfig:
         headers_mode=os.getenv("MASSIVE_HEADERS_MODE", "bearer"),
         underlying_param_name=os.getenv("MASSIVE_UNDERLYING_PARAM_NAME", "underlying_ticker"),
     )
+    cooldown_scope = os.getenv("COOLDOWN_SCOPE", "contract").lower()
+    if cooldown_scope == "ticker":
+        cooldown_scope = "contract"
+
     scan = ScanConfig(
         tickers=_list("SCAN_TICKERS"),
         chain_discovery=os.getenv("CHAIN_DISCOVERY", "snapshot"),
@@ -133,7 +137,7 @@ def load_config() -> AppConfig:
         medium_threshold=_float("MEDIUM_THRESHOLD", 7.0),
         cooldown_minutes=_int("COOLDOWN_MINUTES", 30),
         alert_cooldown_seconds=_int("ALERT_COOLDOWN_SECONDS", _int("COOLDOWN_MINUTES", 30) * 60),
-        cooldown_scope=os.getenv("COOLDOWN_SCOPE", "contract").lower(),
+        cooldown_scope=cooldown_scope,
         allow_one_alert_per_ticker=_bool("ALLOW_ONE_ALERT_PER_TICKER", False),
         quotes_mode_score_penalty=_float("QUOTES_MODE_SCORE_PENALTY", 0.75),
         quotes_mode_notional_cap=_float("QUOTES_MODE_NOTIONAL_CAP", 250000),
