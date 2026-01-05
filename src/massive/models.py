@@ -20,6 +20,8 @@ class OptionQuote(BaseModel):
     option_symbol: str
     bid: float
     ask: float
+    bid_size: Optional[float] = None
+    ask_size: Optional[float] = None
     quote_time: datetime
 
 
@@ -34,6 +36,9 @@ class OptionSnapshot(BaseModel):
     delta: Optional[float]
     gamma: Optional[float]
     underlying_price: Optional[float]
+    day_volume: Optional[float] = None
+    day_notional: Optional[float] = None
+    day_vwap: Optional[float] = None
     last_trade: Optional[OptionTrade] = None
     last_quote: Optional[OptionQuote] = None
 
@@ -61,6 +66,8 @@ class OptionSnapshot(BaseModel):
             return None
         bid = data.get("bid") or data.get("bid_price")
         ask = data.get("ask") or data.get("ask_price")
+        bid_size = data.get("bid_size") or data.get("bidSize")
+        ask_size = data.get("ask_size") or data.get("askSize")
         quote_time = data.get("timestamp") or data.get("time") or data.get("quote_time")
         if bid is None or ask is None or quote_time is None:
             return None
@@ -68,6 +75,8 @@ class OptionSnapshot(BaseModel):
             option_symbol=option_symbol,
             bid=float(bid),
             ask=float(ask),
+            bid_size=float(bid_size) if bid_size is not None else None,
+            ask_size=float(ask_size) if ask_size is not None else None,
             quote_time=quote_time,
         )
 
@@ -102,6 +111,10 @@ class OptionSnapshot(BaseModel):
         delta = payload.get("delta")
         gamma = payload.get("gamma")
         underlying_price = payload.get("underlying_price") or payload.get("underlyingPrice")
+        day = payload.get("day") or {}
+        day_volume = day.get("volume") if isinstance(day, dict) else payload.get("volume")
+        day_notional = day.get("notional") if isinstance(day, dict) else payload.get("notional")
+        day_vwap = day.get("vwap") if isinstance(day, dict) else payload.get("vwap")
 
         missing_fields = [name for name, value in (("expiry", expiry), ("strike", strike)) if value is None]
         if missing_fields:
@@ -129,6 +142,9 @@ class OptionSnapshot(BaseModel):
                 delta=delta,
                 gamma=gamma,
                 underlying_price=underlying_price,
+                day_volume=day_volume,
+                day_notional=day_notional,
+                day_vwap=day_vwap,
                 last_trade=last_trade,
                 last_quote=last_quote,
             )
@@ -201,6 +217,9 @@ class OptionSnapshot(BaseModel):
             "delta": delta,
             "gamma": gamma,
             "underlying_price": underlying_price,
+            "day_volume": day_volume,
+            "day_notional": day_notional,
+            "day_vwap": day_vwap,
         }
 
         last_trade = cls._parse_last_trade(payload.get("last_trade"), option_symbol, underlying)

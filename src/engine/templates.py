@@ -22,5 +22,6 @@ def render_alert(cluster, setup: str, score: float, components: dict, tags: list
         "contracts_total": cluster.contracts_total,
         "aggression": round(cluster.ask_side_ratio, 2),
         "vol_oi": cluster.contracts_total / max(cluster.oi or cluster.contracts_total, 1),
+        "mode": cluster.data_mode,
         "tags": tags,
     }

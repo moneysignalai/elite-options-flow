@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict, List, Tuple
 from urllib.parse import parse_qsl
 
@@ -316,13 +317,29 @@ class MassiveClient:
         return quotes
 
     @with_retries()
-    def get_option_trades(self, options_ticker: str) -> List[models.OptionTrade]:
+    def get_option_trades(
+        self,
+        options_ticker: str,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        limit: int | None = None,
+    ) -> List[models.OptionTrade]:
         if not self.cfg.trades_path:
             log_event(self.logger, "trades_endpoint_unavailable", ticker=options_ticker)
             return []
 
         path = self.cfg.trades_path.format(options_ticker=options_ticker)
-        request = self.client.build_request("GET", path, headers=self.headers)
+        params: Dict[str, Any] = {}
+        if start_time:
+            params["start"] = start_time.isoformat()
+        if end_time:
+            params["end"] = end_time.isoformat()
+        if limit:
+            params["limit"] = limit
+
+        request = self.client.build_request(
+            "GET", path, headers=self.headers, params=params or None
+        )
         response = self._send_request(request, ticker=options_ticker)
         if response is None:
             return []
@@ -366,7 +383,11 @@ class MassiveClient:
 
     @with_retries()
     def get_contract_snapshot(self, underlying: str, option_symbol: str) -> models.OptionSnapshot | None:
-        path_template = self.cfg.quotes_path or self.cfg.trades_path
+        path_template = (
+            self.cfg.snapshot_path
+            or self.cfg.quotes_path
+            or self.cfg.trades_path
+        )
         if not path_template:
             log_event(
                 self.logger,
