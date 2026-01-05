@@ -87,27 +87,22 @@ def load_config() -> AppConfig:
         base_url=os.getenv("MASSIVE_BASE_URL", "https://api.massive.com"),
         trades_path=os.getenv(
             "MASSIVE_TRADES_PATH",
-            os.getenv(
-                "MASSIVE_TRADES_PATH_TEMPLATE",
-                "/v3/snapshot/options/{underlying}/{option_symbol}",
-            ),
+            os.getenv("MASSIVE_TRADES_PATH_TEMPLATE", ""),
         ),
         quotes_path=os.getenv(
             "MASSIVE_QUOTES_PATH",
-            os.getenv(
-                "MASSIVE_QUOTES_PATH_TEMPLATE",
-                "/v3/snapshot/options/{underlying}/{option_symbol}",
-            ),
+            os.getenv("MASSIVE_QUOTES_PATH_TEMPLATE", "/v3/quotes/{options_ticker}"),
         ),
         snapshot_path=os.getenv(
             "MASSIVE_SNAPSHOT_PATH",
-            os.getenv(
-                "MASSIVE_SNAPSHOT_PATH_TEMPLATE", "/v3/snapshot/options/{ticker}"
-            ),
+            os.getenv("MASSIVE_SNAPSHOT_PATH_TEMPLATE", "/v3/snapshot/options/{underlying}"),
         ),
         contract_search_path=os.getenv(
             "MASSIVE_CONTRACT_SEARCH_PATH",
-            os.getenv("MASSIVE_CONTRACT_SEARCH_PATH_TEMPLATE", "/v3/reference/options/contracts"),
+            os.getenv(
+                "MASSIVE_CONTRACT_SEARCH_PATH_TEMPLATE",
+                "/v3/reference/options/contracts",
+            ),
         ),
         contract_search_query=os.getenv("MASSIVE_CONTRACT_SEARCH_QUERY"),
         use_legacy_contract_search=_bool("MASSIVE_USE_LEGACY_CONTRACT_SEARCH", False),

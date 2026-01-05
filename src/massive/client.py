@@ -22,6 +22,13 @@ class MassiveClient:
         self.client = httpx.Client(base_url=self.cfg.base_url, timeout=self.cfg.timeout)
         self.logger = logger or get_logger("app")
 
+    @staticmethod
+    def _elapsed_ms(response: httpx.Response) -> float | None:
+        try:
+            return response.elapsed.total_seconds() * 1000 if response.elapsed else None
+        except RuntimeError:
+            return None
+
     def _build_headers(self) -> Dict[str, str]:
         if not self.cfg.api_key:
             return {}
@@ -122,14 +129,20 @@ class MassiveClient:
                 ticker=underlying,
                 status_code=status_code,
             )
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404:
+                log_event(self.logger, "schema_mismatch", top_level_keys=None)
+                return []
             raise
 
-        elapsed_ms = response.elapsed.total_seconds() * 1000 if response.elapsed else None
+        elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
 
         data = response.json()
         payload, top_keys, inferred_key = self._extract_contract_candidates(data)
         contracts = self._parse_contract_references(payload)
+
+        if payload is not None and not isinstance(payload, list):
+            log_event(self.logger, "schema_mismatch", top_level_keys=top_keys)
 
         log_massive_response(
             self.logger,
@@ -156,8 +169,10 @@ class MassiveClient:
         return contracts
 
     @with_retries()
-    def get_options_snapshot(self, underlying: str, limit: int | None = None) -> List[str]:
-        path = self.cfg.snapshot_path.format(ticker=underlying, symbol=underlying)
+    def get_option_snapshot(self, underlying: str, limit: int | None = None) -> List[str]:
+        path = self.cfg.snapshot_path.format(
+            ticker=underlying, symbol=underlying, underlying=underlying
+        )
         params: Dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
@@ -182,11 +197,14 @@ class MassiveClient:
                 return []
             raise
 
-        elapsed_ms = response.elapsed.total_seconds() * 1000 if response.elapsed else None
+        elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
 
         data = response.json()
         payload, top_keys, inferred_key = self._extract_contract_candidates(data)
+
+        if payload is not None and not isinstance(payload, list):
+            log_event(self.logger, "schema_mismatch", top_level_keys=top_keys)
 
         symbols: List[str] = []
         for entry in payload:
@@ -215,10 +233,151 @@ class MassiveClient:
 
         return symbols
 
+    def get_options_snapshot(self, underlying: str, limit: int | None = None) -> List[str]:
+        return self.get_option_snapshot(underlying, limit)
+
+    @with_retries()
+    def get_option_quotes(self, options_ticker: str) -> List[models.OptionQuote]:
+        path = self.cfg.quotes_path.format(options_ticker=options_ticker)
+        request = self.client.build_request("GET", path, headers=self.headers)
+        url = str(request.url)
+        log_massive_request(self.logger, "GET", url, params=None, ticker=options_ticker)
+
+        try:
+            response = self.client.send(request)
+            response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            status_code = None
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code
+            log_massive_failure(
+                self.logger,
+                url,
+                None,
+                exc,
+                ticker=options_ticker,
+                status_code=status_code,
+            )
+            if status_code == 404:
+                log_event(self.logger, "schema_mismatch", top_level_keys=None)
+                return []
+            raise
+
+        elapsed_ms = self._elapsed_ms(response)
+        content_type = response.headers.get("content-type")
+
+        data = response.json()
+        payload, top_keys, _ = self._extract_contract_candidates(data)
+        if payload is not None and not isinstance(payload, list):
+            log_event(self.logger, "schema_mismatch", top_level_keys=top_keys)
+
+        quotes: List[models.OptionQuote] = []
+        for entry in payload:
+            quote = models.OptionSnapshot._parse_last_quote(entry, options_ticker)
+            if quote:
+                quotes.append(quote)
+            else:
+                self.logger.warning("quote_parse_failed", invalid_entry=entry)
+
+        log_massive_response(
+            self.logger,
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            content_type=content_type,
+            top_level_keys=top_keys,
+            parsed_count=len(quotes),
+        )
+
+        return quotes
+
+    @with_retries()
+    def get_option_trades(self, options_ticker: str) -> List[models.OptionTrade]:
+        if not self.cfg.trades_path:
+            log_event(self.logger, "trades_endpoint_unavailable", ticker=options_ticker)
+            return []
+
+        path = self.cfg.trades_path.format(options_ticker=options_ticker)
+        request = self.client.build_request("GET", path, headers=self.headers)
+        url = str(request.url)
+        log_massive_request(self.logger, "GET", url, params=None, ticker=options_ticker)
+
+        try:
+            response = self.client.send(request)
+            response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            status_code = None
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code
+            log_massive_failure(
+                self.logger,
+                url,
+                None,
+                exc,
+                ticker=options_ticker,
+                status_code=status_code,
+            )
+            if status_code == 404:
+                log_event(
+                    self.logger,
+                    "trades_endpoint_unavailable",
+                    ticker=options_ticker,
+                    status_code=status_code,
+                )
+                return []
+            raise
+
+        elapsed_ms = self._elapsed_ms(response)
+        content_type = response.headers.get("content-type")
+
+        data = response.json()
+        payload, top_keys, _ = self._extract_contract_candidates(data)
+        if payload is not None and not isinstance(payload, list):
+            log_event(self.logger, "schema_mismatch", top_level_keys=top_keys)
+
+        trades: List[models.OptionTrade] = []
+        for entry in payload:
+            try:
+                trades.append(models.OptionTrade.parse_obj(entry))
+                continue
+            except Exception:
+                trade = models.OptionSnapshot._parse_last_trade(
+                    entry,
+                    option_symbol=options_ticker,
+                    underlying=entry.get("underlying") or entry.get("underlying_ticker") or "",
+                )
+                if trade:
+                    trades.append(trade)
+                else:
+                    self.logger.warning("trade_parse_failed", invalid_entry=entry)
+
+        log_massive_response(
+            self.logger,
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            content_type=content_type,
+            top_level_keys=top_keys,
+            parsed_count=len(trades),
+        )
+
+        return trades
+
     @with_retries()
     def get_contract_snapshot(self, underlying: str, option_symbol: str) -> models.OptionSnapshot | None:
-        path = self.cfg.trades_path.format(
-            option_symbol=option_symbol, underlying=underlying, ticker=underlying
+        path_template = self.cfg.quotes_path or self.cfg.trades_path
+        if not path_template:
+            log_event(
+                self.logger,
+                "trades_endpoint_unavailable",
+                ticker=underlying,
+                option_contract=option_symbol,
+            )
+            return None
+
+        path = path_template.format(
+            option_symbol=option_symbol,
+            underlying=underlying,
+            ticker=underlying,
+            options_ticker=option_symbol,
         )
         request = self.client.build_request("GET", path, headers=self.headers)
         url = str(request.url)
@@ -244,10 +403,18 @@ class MassiveClient:
                 status_code=exc.response.status_code,
             )
             if exc.response.status_code in {403, 404}:
+                if exc.response.status_code == 404:
+                    log_event(
+                        self.logger,
+                        "trades_endpoint_unavailable",
+                        ticker=underlying,
+                        option_contract=option_symbol,
+                        status_code=exc.response.status_code,
+                    )
                 return None
             raise
 
-        elapsed_ms = response.elapsed.total_seconds() * 1000 if response.elapsed else None
+        elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
         data = response.json()
 
@@ -255,12 +422,19 @@ class MassiveClient:
         if isinstance(payload, list) and payload:
             payload = payload[0]
         if not isinstance(payload, dict):
+            top_level_keys = list(data.keys()) if isinstance(data, dict) else None
+            log_event(
+                self.logger,
+                "schema_mismatch",
+                top_level_keys=top_level_keys,
+                option_contract=option_symbol,
+            )
             log_event(
                 self.logger,
                 "contract_snapshot_empty",
                 ticker=underlying,
                 option_contract=option_symbol,
-                top_level_keys=list(data.keys()) if isinstance(data, dict) else None,
+                top_level_keys=top_level_keys,
             )
             return None
 
