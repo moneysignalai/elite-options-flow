@@ -1,6 +1,6 @@
 from telegram import Bot
 
-from src.utils.logging import get_logger, log_error
+from src.utils.logging import get_logger, log_error, log_event
 
 
 class TelegramMessenger:
@@ -10,7 +10,7 @@ class TelegramMessenger:
         self.bot = Bot(token) if self.enabled else None
         self.logger = logger or get_logger("app")
         if not self.enabled:
-            self.logger.info("messaging disabled", event="messaging_disabled", reason="missing_token_or_chat_id")
+            log_event(self.logger, "messaging_disabled", reason="missing_token_or_chat_id")
 
     def send(self, payload: dict):
         if not self.enabled:

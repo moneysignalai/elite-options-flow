@@ -25,7 +25,6 @@ class MassiveClient:
         except Exception as exc:  # noqa: BLE001
             self.logger.exception(
                 "parse trades failed",
-                event="error",
                 where="MassiveClient.get_option_trades",
                 exception_type=type(exc).__name__,
                 exception_message=str(exc),

@@ -4,7 +4,7 @@ from datetime import datetime
 from collections import deque
 from typing import List
 
-from src.utils.logging import get_logger, log_error
+from src.utils.logging import get_logger, log_error, log_event
 
 from src.storage import models
 from src.engine.dedupe import cluster_key
@@ -82,9 +82,9 @@ class AlertRepository:
                 )
                 session.commit()
                 duration_ms = int((time.time() - start) * 1000)
-                self.logger.info(
+                log_event(
+                    self.logger,
                     "db_write",
-                    event="db_write",
                     table="alerts",
                     alert_id=alert.id,
                     duration_ms=duration_ms,

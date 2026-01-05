@@ -12,7 +12,7 @@ from src.messaging.telegram import TelegramMessenger
 from src.storage.db import init_engine, get_session_factory
 from src.storage.repository import AlertRepository
 from src.utils.time import within_window, now_tz, sleep_seconds
-from src.utils.logging import get_logger, set_run_id, log_error
+from src.utils.logging import get_logger, log_event, log_error, set_run_id
 
 
 def run_once(
@@ -25,10 +25,10 @@ def run_once(
     config,
     log,
 ):
-    log.info("ticker_start", event="ticker_start", ticker=ticker)
+    log_event(log, "ticker_start", ticker=ticker)
     contracts = discovery.contracts_for(ticker)
     if not contracts:
-        log.info("candidates", event="candidates", trades=0, contracts=0, ticker=ticker)
+        log_event(log, "candidates", trades=0, contracts=0, ticker=ticker)
         return {"clusters": 0, "sent": 0, "suppressed": 0}
     clusters_accum = []
     for option_symbol in contracts:
@@ -40,7 +40,6 @@ def run_once(
         clusters_accum.extend(clusters)
     log.info(
         "cluster_build",
-        event="cluster_build",
         ticker=ticker,
         candidates=len(contracts),
         clusters=len(clusters_accum),
@@ -50,7 +49,6 @@ def run_once(
     )
     log.info(
         "scoring",
-        event="scoring",
         ticker=ticker,
         top_score=max([c.premium_total for c in clusters_accum], default=0),
     )
@@ -72,11 +70,11 @@ def main():
         engine = init_engine(config.database_url)
         session_factory = get_session_factory(engine)
     else:
-        log.info("db_disabled", event="db_disabled")
+        log_event(log, "db_disabled")
     repo = AlertRepository(session_factory=session_factory, logger=log)
     router = AlertRouter(repo, messenger, cooldown, config, logger=log)
 
-    log.info("worker_start", event="worker_start", universe_count=len(config.scan.tickers))
+    log_event(log, "worker_start", universe_count=len(config.scan.tickers))
     while True:
         now = now_tz()
         if not within_window(
@@ -86,7 +84,7 @@ def main():
             config.scan.enable_premarket,
             config.scan.enable_afterhours,
         ):
-            log.info("scan_skipped", event="scan_skipped", now=now.isoformat(), reason="outside_window")
+            log_event(log, "scan_skipped", now=now.isoformat(), reason="outside_window")
             time.sleep(sleep_seconds(True, config.scan.scan_interval_seconds))
             continue
 
@@ -97,9 +95,9 @@ def main():
         triggered = 0
         suppressed = 0
         errors = 0
-        iteration_log.info(
+        log_event(
+            iteration_log,
             "scan_start",
-            event="scan_start",
             universe_count=len(config.scan.tickers),
             tickers=config.scan.tickers,
             window="rth" if not (config.scan.enable_afterhours or config.scan.enable_premarket) else "extended",
@@ -123,9 +121,9 @@ def main():
                 log_error(ticker_log, "run_once", exc)
                 errors += 1
         duration_ms = int((time.time() - scan_start) * 1000)
-        iteration_log.info(
+        log_event(
+            iteration_log,
             "scan_end",
-            event="scan_end",
             scanned_count=len(config.scan.tickers),
             candidates_count=triggered + suppressed,
             alerts_sent=triggered,

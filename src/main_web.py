@@ -19,7 +19,7 @@ from src.engine.templates import render_alert
 from src.engine.classify import classify_cluster
 from src.engine.score import score_cluster
 from src.utils.time import now_tz
-from src.utils.logging import get_logger, set_request_id, log_error
+from src.utils.logging import get_logger, log_error, log_event, set_request_id
 
 logger = get_logger("web")
 config = load_config()
@@ -30,7 +30,7 @@ if config.database_url:
     engine = init_engine(config.database_url)
     session_factory = get_session_factory(engine)
 else:
-    logger.info("db_disabled", event="db_disabled")
+    log_event(logger, "db_disabled")
 repo = AlertRepository(session_factory=session_factory, logger=logger)
 messenger = TelegramMessenger(config.telegram.bot_token, config.telegram.chat_id, logger=logger)
 cooldown = CooldownManager(config.scan.cooldown_minutes)
@@ -58,9 +58,9 @@ async def request_context(request: Request, call_next):
         set_request_id(None)
         raise
     latency_ms = int((time.time() - start) * 1000)
-    request_log.info(
+    log_event(
+        request_log,
         "request_complete",
-        event="request_complete",
         status_code=response.status_code,
         latency_ms=latency_ms,
     )
@@ -117,5 +117,5 @@ async def reload_config(request: Request):
     global config
     config = load_config()
     req_log = getattr(request.state, "logger", logger)
-    req_log.info("config_reloaded", event="config_reloaded", tickers=config.scan.tickers)
+    log_event(req_log, "config_reloaded", tickers=config.scan.tickers)
     return {"status": "reloaded", "tickers": config.scan.tickers}
