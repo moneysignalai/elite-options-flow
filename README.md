@@ -90,6 +90,7 @@ Minimal configuration required to boot:
 **Web**
 - `ENV=prod`
 - `LOG_LEVEL=INFO`
+- `LOG_FORMAT=json` (use `console` for human-readable logs)
 - `MASSIVE_API_KEY` (required)
 - `MASSIVE_BASE_URL=https://api.massive.com`
 - `DATABASE_URL` (optional; enables Postgres persistence)
@@ -108,6 +109,11 @@ Cooldown and quotes fallback controls:
 - `QUOTES_MODE_SCORE_PENALTY` – multiplier applied to scores when running in quotes fallback mode (default `0.75`).
 - `QUOTES_MODE_NOTIONAL_CAP` – hard ceiling for quote-derived notional estimates (default `250000`).
 - `QUOTES_MODE_REQUIRE_MIN_OI` – minimum OI needed to admit quotes-only clusters when OI is known (default `50`).
+
+Readable console logs (instead of JSON):
+```bash
+LOG_FORMAT=console LOG_LEVEL=INFO python -m src.worker
+```
 
 ## Contract Discovery Modes
 - `CHAIN_DISCOVERY=reference` (default): uses Massive contract search endpoint to grab nearby contracts per underlying.
