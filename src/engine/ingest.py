@@ -14,7 +14,9 @@ class TradeQuoteMatcher:
         for trade in trades:
             quote = self._nearest_quote(trade, quotes_by_symbol)
             side = self._infer_side(trade, quote) if quote else None
-            labeled.append(OptionTrade(**trade.dict(), side=side))
+            trade_payload: Dict = trade.dict()
+            trade_payload["side"] = side or trade_payload.get("side")
+            labeled.append(OptionTrade(**trade_payload))
         return labeled
 
     def _nearest_quote(self, trade: OptionTrade, quotes: List[OptionQuote]):

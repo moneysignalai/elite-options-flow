@@ -26,6 +26,14 @@ def score_cluster(cluster: FlowCluster) -> tuple[float, Dict[str, float], list[s
     components["structure"] = structure
     # repeats placeholder
     components["repeats"] = 0.5 if cluster.prints_count > 3 else 0.0
+    if cluster.data_mode == "trades":
+        components["mode"] = 0.5
+    elif cluster.data_mode == "snapshot":
+        components["mode"] = 0.25
+        tags.append("snapshot_based")
+    else:
+        components["mode"] = 0.1
+        tags.append("quote_based")
 
     total = sum(components.values())
     if total > 10:

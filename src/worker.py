@@ -1,7 +1,7 @@
 import os
 import time
 import uuid
-from datetime import timezone
+from datetime import timezone, timedelta
 
 from src.config import load_config, validate_config
 from src.massive.client import MassiveClient
@@ -29,28 +29,75 @@ def run_once(
 ):
     log_event(log, "ticker_start", ticker=ticker)
     contracts = discovery.contracts_for(ticker)
+    log_event(
+        log,
+        "snapshot_summary",
+        ticker=ticker,
+        returned_count=len(contracts),
+    )
     if not contracts:
         log_event(log, "candidates", trades=0, contracts=0, ticker=ticker)
         return {"clusters": 0, "sent": 0, "suppressed": 0}
     clusters_accum = []
+    now = now_tz()
+    start_window = now - timedelta(minutes=config.scan.max_lookback_minutes)
     for option_symbol in contracts:
         snapshot = client.get_contract_snapshot(ticker, option_symbol)
         if not snapshot:
             log_event(log, "contract_snapshot_missing", ticker=ticker, option_symbol=option_symbol)
             continue
-        trades = [snapshot.last_trade] if snapshot.last_trade else []
+        trades = client.get_option_trades(option_symbol, start_window, now)
         quotes = [snapshot.last_quote] if snapshot.last_quote else []
-        if not trades:
+        has_snapshot_signal = bool(snapshot.last_trade or snapshot.day_volume or snapshot.oi)
+        mode = "trades" if trades else "snapshot" if has_snapshot_signal else "quotes_fallback"
+        reason = (
+            "trade_endpoint"
+            if trades
+            else "snapshot_last_trade" if snapshot.last_trade else "snapshot_liquidity" if has_snapshot_signal else "no_trades_available"
+        )
+        if not trades and snapshot.last_trade:
+            trades = [snapshot.last_trade]
+        if not quotes:
+            quotes = client.get_option_quotes(option_symbol)
+        log_event(
+            log,
+            "contract_mode_selected",
+            ticker=ticker,
+            option_symbol=option_symbol,
+            mode=mode,
+            reason=reason,
+            trades_count=len(trades),
+            quotes_count=len(quotes),
+            day_volume=snapshot.day_volume,
+            oi=snapshot.oi,
+        )
+        if trades:
+            labeled = matcher.label_aggression(trades, quotes)
+            clusters = cluster_builder.build(labeled, snapshot)
+        else:
+            fallback_cluster = cluster_builder.build_snapshot_cluster(
+                snapshot, quotes, mode="snapshot" if mode == "snapshot" else "quotes"
+            )
+            clusters = [fallback_cluster] if fallback_cluster else []
+            if not fallback_cluster:
+                log_event(
+                    log,
+                    "no_trades_for_contract",
+                    ticker=ticker,
+                    option_symbol=option_symbol,
+                )
+        clusters_accum.extend([c for c in clusters if c])
+        if clusters:
+            top_cluster = max(clusters, key=lambda c: c.premium_total)
             log_event(
                 log,
-                "no_trades_for_contract",
-                ticker=ticker,
+                "cluster_summary",
                 option_symbol=option_symbol,
+                clusters_built=len(clusters),
+                top_cluster_notional=top_cluster.premium_total,
+                top_cluster_trades=top_cluster.prints_count,
+                mode=top_cluster.data_mode,
             )
-            continue
-        labeled = matcher.label_aggression(trades, quotes)
-        clusters = cluster_builder.build(labeled, snapshot)
-        clusters_accum.extend(clusters)
     log.info(
         "cluster_build",
         ticker=ticker,
@@ -60,10 +107,11 @@ def run_once(
     result = router.process_clusters(
         clusters_accum, config.scan.gamma_dte_max, config.scan.structural_dte_min, log
     )
+    top_premium = max([c.premium_total for c in clusters_accum], default=0)
     log.info(
         "scoring",
         ticker=ticker,
-        top_score=max([c.premium_total for c in clusters_accum], default=0),
+        top_score=top_premium,
     )
     return result
 
