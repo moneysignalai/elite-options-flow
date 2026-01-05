@@ -90,6 +90,16 @@ class AlertRepository:
                     duration_ms=duration_ms,
                     success=True,
                 )
+                log_event(
+                    self.logger,
+                    "alert_persisted",
+                    alert_id=alert.id,
+                    ticker=cluster.underlying,
+                    option_symbol=cluster.option_symbol,
+                    score=score,
+                    template=template,
+                    sent_ts=record["ts"].isoformat(),
+                )
                 return alert.id
             except Exception as exc:  # noqa: BLE001
                 log_error(self.logger, "save_alert", exc)
@@ -103,6 +113,16 @@ class AlertRepository:
                 "last_score": score,
                 "last_premium": cluster.premium_total,
             }
+            log_event(
+                self.logger,
+                "alert_persisted",
+                alert_id=len(self.memory_alerts),
+                ticker=cluster.underlying,
+                option_symbol=cluster.option_symbol,
+                score=score,
+                template=template,
+                sent_ts=record["ts"].isoformat(),
+            )
             return len(self.memory_alerts)
 
     def recent_alerts(self, limit: int = 100) -> List[dict]:

@@ -28,6 +28,11 @@ def _log_level() -> int:
     return getattr(logging, name, logging.INFO)
 
 
+def _log_format() -> str:
+    value = os.getenv("LOG_FORMAT", "json").lower()
+    return value if value in {"json", "console"} else "json"
+
+
 def _add_contextvars(_: structlog.types.WrappedLogger, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     run_id = _run_id_ctx.get()
     request_id = _request_id_ctx.get()
@@ -56,6 +61,13 @@ def configure_logging() -> None:
         return
 
     logging.basicConfig(stream=sys.stdout, level=_log_level(), format="%(message)s")
+
+    log_format = _log_format()
+    final_renderer = (
+        structlog.dev.ConsoleRenderer(colors=False)
+        if log_format == "console"
+        else structlog.processors.JSONRenderer()
+    )
     structlog.configure(
         processors=[
             structlog.processors.TimeStamper(fmt="iso", utc=True, key="timestamp"),
@@ -64,7 +76,7 @@ def configure_logging() -> None:
             _add_base_fields,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer(),
+            final_renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(_log_level()),
         context_class=dict,

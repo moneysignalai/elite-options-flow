@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 
@@ -8,7 +8,7 @@ def now_tz(tz_name: str = "America/New_York") -> datetime:
 
 def within_window(
     current: datetime, start: str, end: str, enable_pre: bool, enable_after: bool
-) -> tuple[bool, str]:
+) -> tuple[bool, str, datetime, int]:
     market_tz = ZoneInfo("America/New_York")
     current_local = (
         current.astimezone(market_tz)
@@ -26,16 +26,24 @@ def within_window(
     )
 
     if current_local < start_dt:
-        if enable_pre:
-            return True, "pre_market"
-        return False, "premarket_disabled"
+        is_open = enable_pre
+        reason = "pre_market" if enable_pre else "premarket_disabled"
+        next_transition = start_dt
+    elif current_local > end_dt:
+        is_open = enable_after
+        reason = "after_hours" if enable_after else "afterhours_disabled"
+        next_transition = datetime.combine(
+            current_local.date(), time(start_hour, start_minute), tzinfo=market_tz
+        ) + timedelta(days=1)
+    else:
+        is_open = True
+        reason = "regular_hours"
+        next_transition = end_dt
 
-    if current_local > end_dt:
-        if enable_after:
-            return True, "after_hours"
-        return False, "afterhours_disabled"
-
-    return True, "regular_hours"
+    seconds_until_transition = max(
+        0, int((next_transition - current_local).total_seconds())
+    )
+    return is_open, reason, next_transition, seconds_until_transition
 
 
 def dte(expiry, current=None):

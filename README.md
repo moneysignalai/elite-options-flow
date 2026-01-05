@@ -154,6 +154,10 @@ Examples (Render-friendly key/value):
 - `alert suppressed | reason=dedupe|below_threshold`
 - `scan end | duration_ms=... triggered=... suppressed=... errors=...`
 
+Tunable env vars:
+- `LOG_FORMAT` – `json` (default) for structured logs or `console` for human-readable console output.
+- `LOG_LEVEL` – `INFO` (default) or `DEBUG` for verbose breadcrumbs.
+
 ## Alert Examples
 - SHORT: `score 6.2` aggressive sweep, near-dated OTM.
 - MEDIUM: `score 7.5` strong aggression + premium size.

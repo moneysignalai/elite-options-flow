@@ -29,6 +29,7 @@ def run_once(
 ):
     log_event(log, "ticker_start", ticker=ticker)
     contracts = discovery.contracts_for(ticker)
+    log_event(log, "contracts_discovered", ticker=ticker, contracts_count=len(contracts))
     log_event(
         log,
         "snapshot_summary",
@@ -44,7 +45,13 @@ def run_once(
     for option_symbol in contracts:
         snapshot = client.get_contract_snapshot(ticker, option_symbol)
         if not snapshot:
-            log_event(log, "contract_snapshot_missing", ticker=ticker, option_symbol=option_symbol)
+            log_event(
+                log,
+                "contract_snapshot_missing",
+                ticker=ticker,
+                option_symbol=option_symbol,
+                mode="snapshot_lookup",
+            )
             continue
         trades = client.get_option_trades(option_symbol, start_window, now)
         quotes = [snapshot.last_quote] if snapshot.last_quote else []
@@ -61,6 +68,17 @@ def run_once(
             quotes = client.get_option_quotes(option_symbol)
         log_event(
             log,
+            "contract_data_fetched",
+            ticker=ticker,
+            option_symbol=option_symbol,
+            trades_count=len(trades),
+            used_quotes_fallback=not bool(trades),
+            snapshot_has_last_trade=bool(snapshot.last_trade),
+            snapshot_day_volume=snapshot.day_volume,
+            snapshot_oi=snapshot.oi,
+        )
+        log_event(
+            log,
             "contract_mode_selected",
             ticker=ticker,
             option_symbol=option_symbol,
@@ -71,6 +89,14 @@ def run_once(
             day_volume=snapshot.day_volume,
             oi=snapshot.oi,
         )
+        if not trades:
+            log_event(
+                log,
+                "quotes_fallback_used",
+                ticker=ticker,
+                option_symbol=option_symbol,
+                quotes_count=len(quotes),
+            )
         if trades:
             labeled = matcher.label_aggression(trades, quotes)
             clusters = cluster_builder.build(labeled, snapshot)
@@ -99,6 +125,16 @@ def run_once(
                 mode=top_cluster.data_mode,
                 notional_basis=getattr(top_cluster, "notional_basis", None),
             )
+        log_event(
+            log,
+            "clusters_built",
+            ticker=ticker,
+            option_symbol=option_symbol,
+            clusters_count=len(clusters),
+            prints_total=sum(c.prints_count for c in clusters if c),
+            lookback_start_iso=start_window.isoformat(),
+            lookback_end_iso=now.isoformat(),
+        )
     log.info(
         "cluster_build",
         ticker=ticker,
@@ -110,13 +146,17 @@ def run_once(
     )
     log_event(
         log,
-        "alert_summary",
+        "alert_routing_summary",
         ticker=ticker,
-        qualifying_count=result.get("qualifying", 0),
-        sent_count=result.get("sent", 0),
-        suppressed_below_threshold_count=result.get("suppressed_below_threshold", 0),
-        suppressed_cooldown_count=result.get("suppressed_cooldown", 0),
-        suppressed_quota_count=result.get("suppressed_quota", 0),
+        clusters=len(clusters_accum),
+        sent=result.get("sent", 0),
+        suppressed=result.get("suppressed", 0),
+        suppressed_reasons_breakdown={
+            "below_threshold": result.get("suppressed_below_threshold", 0),
+            "cooldown": result.get("suppressed_cooldown", 0),
+            "quota": result.get("suppressed_quota", 0),
+        },
+        qualifying=result.get("qualifying", 0),
     )
     top_premium = max([c.premium_total for c in clusters_accum], default=0)
     log.info(
@@ -154,6 +194,8 @@ def main():
     router = AlertRouter(repo, messenger, cooldown, config, logger=log)
 
     log_event(log, "worker_start", universe_count=len(config.scan.tickers))
+    last_is_open: bool | None = None
+    last_window_reason: str | None = None
     while True:
         if not config.scan.tickers:
             log_event(
@@ -166,16 +208,31 @@ def main():
             continue
 
         now = now_tz()
-        is_open, window_reason = within_window(
+        (
+            is_open,
+            window_reason,
+            next_transition_local,
+            seconds_until_transition,
+        ) = within_window(
             now,
             config.scan.rth_start,
             config.scan.rth_end,
             config.scan.enable_premarket,
             config.scan.enable_afterhours,
         )
-        log_event(
-            log,
+        next_transition_local_iso = next_transition_local.isoformat()
+        next_scan_in_seconds = sleep_seconds(
+            outside=not is_open, interval=config.scan.scan_interval_seconds
+        )
+        state_changed = (
+            last_is_open is None
+            or is_open != last_is_open
+            or window_reason != last_window_reason
+        )
+        market_log_func = log.info if state_changed else log.debug
+        market_log_func(
             "market_window_check",
+            event="market_window_check",
             now_local=now.isoformat(),
             now_utc=now.astimezone(timezone.utc).isoformat(),
             market_tz="America/New_York",
@@ -185,10 +242,24 @@ def main():
             enable_afterhours=config.scan.enable_afterhours,
             is_open=is_open,
             reason=window_reason,
+            next_transition_time=next_transition_local_iso,
+            seconds_until_transition=seconds_until_transition,
+            next_scan_in_seconds=next_scan_in_seconds,
         )
+        last_is_open = is_open
+        last_window_reason = window_reason
         if not is_open:
-            log_event(log, "scan_skipped", now=now.isoformat(), reason=window_reason)
-            time.sleep(sleep_seconds(True, config.scan.scan_interval_seconds))
+            skip_log_func = log.info if state_changed else log.debug
+            skip_log_func(
+                "scan_skipped",
+                event="scan_skipped",
+                now=now.isoformat(),
+                reason=window_reason,
+                next_transition_local_iso=next_transition_local_iso,
+                seconds_until_transition=seconds_until_transition,
+                next_scan_in_seconds=next_scan_in_seconds,
+            )
+            time.sleep(next_scan_in_seconds)
             continue
 
         run_id = uuid.uuid4().hex[:8]
@@ -200,10 +271,13 @@ def main():
         errors = 0
         log_event(
             iteration_log,
-            "scan_start",
+            "scan_iteration_start",
             universe_count=len(config.scan.tickers),
-            tickers=config.scan.tickers,
-            window="rth" if not (config.scan.enable_afterhours or config.scan.enable_premarket) else "extended",
+            scan_interval_seconds=config.scan.scan_interval_seconds,
+            max_lookback_minutes=config.scan.max_lookback_minutes,
+            window="rth"
+            if not (config.scan.enable_afterhours or config.scan.enable_premarket)
+            else "extended",
         )
         for ticker in config.scan.tickers:
             ticker_log = iteration_log.bind(ticker=ticker)
