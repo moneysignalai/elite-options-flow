@@ -3,7 +3,7 @@ import time
 import uuid
 from datetime import timezone
 
-from src.config import load_config
+from src.config import load_config, validate_config
 from src.massive.client import MassiveClient
 from src.engine.discovery import ContractDiscovery
 from src.engine.ingest import TradeQuoteMatcher
@@ -60,6 +60,7 @@ def run_once(
 def main():
     log = get_logger("worker")
     config = load_config()
+    validate_config(config, log)
     client = MassiveClient(config, logger=log)
     discovery = ContractDiscovery(client, config.scan.chain_discovery)
     matcher = TradeQuoteMatcher(config.scan.aggression_window_seconds)

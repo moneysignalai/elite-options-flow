@@ -17,6 +17,9 @@ def mock_app_config() -> AppConfig:
             quotes_path="/options/quotes?symbol={option_symbol}",
             snapshot_path="/options/snapshot?symbol={option_symbol}",
             contract_search_path="/options/contracts?underlying={underlying}",
+            contract_search_query=None,
+            headers_mode="bearer",
+            underlying_param_name="symbol",
             timeout=5.0,
         ),
         scan=ScanConfig(
