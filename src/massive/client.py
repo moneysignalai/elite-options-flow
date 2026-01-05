@@ -37,6 +37,25 @@ class MassiveClient:
         params.setdefault("limit", limit)
         return params
 
+    @staticmethod
+    def _extract_option_symbol(entry: dict) -> str | None:
+        if not isinstance(entry, dict):
+            return None
+
+        for key in ("option_symbol", "optionSymbol", "ticker", "symbol"):
+            val = entry.get(key)
+            if isinstance(val, str) and val:
+                return val
+
+        details = entry.get("details")
+        if isinstance(details, dict):
+            for key in ("ticker", "option_symbol", "optionSymbol", "symbol"):
+                val = details.get(key)
+                if isinstance(val, str) and val:
+                    return val
+
+        return None
+
     @with_retries()
     def get_option_trades(self, option_symbol: str, params: Dict | None = None) -> List[models.OptionTrade]:
         path = self.cfg.trades_path.format(option_symbol=option_symbol)
@@ -65,7 +84,7 @@ class MassiveClient:
 
     @with_retries()
     def get_option_snapshot(self, option_symbol: str) -> models.OptionSnapshot:
-        path = self.cfg.snapshot_path.format(option_symbol=option_symbol)
+        path = self.cfg.snapshot_path.format(option_symbol=option_symbol, ticker=option_symbol)
         response = self.client.get(path, headers=self.headers)
         response.raise_for_status()
         data = response.json()
@@ -161,3 +180,74 @@ class MassiveClient:
             )
 
         return contracts
+
+    @with_retries()
+    def get_options_snapshot(self, underlying: str, limit: int | None = None) -> List[str]:
+        path = self.cfg.snapshot_path.format(ticker=underlying, symbol=underlying)
+        params: Dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+
+        request = self.client.build_request("GET", path, headers=self.headers, params=params)
+        url = str(request.url)
+        log_event(
+            self.logger,
+            "options_snapshot_request",
+            ticker=underlying,
+            url=url,
+            params=params or None,
+        )
+
+        try:
+            response = self.client.send(request)
+            response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            status_code = None
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code
+            log_event(
+                self.logger,
+                "options_snapshot_failed",
+                ticker=underlying,
+                url=url,
+                params=params or None,
+                status_code=status_code,
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+            )
+            raise
+
+        elapsed_ms = response.elapsed.total_seconds() * 1000 if response.elapsed else None
+        content_type = response.headers.get("content-type")
+
+        data = response.json()
+        payload, top_keys, inferred_key = self._extract_contract_candidates(data)
+
+        symbols: List[str] = []
+        for entry in payload:
+            symbol = self._extract_option_symbol(entry)
+            if symbol:
+                symbols.append(symbol)
+
+        log_event(
+            self.logger,
+            "options_snapshot_response",
+            ticker=underlying,
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            content_type=content_type,
+            top_level_keys=top_keys,
+            inferred_list_key=inferred_key,
+            parsed_count=len(symbols),
+        )
+
+        if not symbols:
+            log_event(
+                self.logger,
+                "no_contracts_found",
+                ticker=underlying,
+                response_keys=top_keys,
+            )
+            return []
+
+        return symbols

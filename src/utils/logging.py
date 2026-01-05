@@ -2,6 +2,7 @@ import contextvars
 import logging
 import os
 import sys
+import uuid
 import structlog
 from typing import Any, Callable, Optional
 
@@ -10,14 +11,15 @@ _request_id_ctx = contextvars.ContextVar("request_id", default=None)
 _run_id_ctx = contextvars.ContextVar("run_id", default=None)
 _alert_id_ctx = contextvars.ContextVar("alert_id", default=None)
 _configured = False
+_boot_run_id = uuid.uuid4().hex[:8]
 
 
 def _environment() -> str:
-    return os.getenv("ENVIRONMENT", "prod")
+    return os.getenv("ENV", os.getenv("RENDER_ENV", os.getenv("ENVIRONMENT", "prod")))
 
 
 def _git_sha() -> str:
-    return os.getenv("GIT_SHA", "unknown")
+    return os.getenv("GIT_SHA", os.getenv("RENDER_GIT_COMMIT", "unknown"))
 
 
 def _log_level() -> int:
@@ -43,6 +45,7 @@ def _add_base_fields(logger: structlog.types.WrappedLogger, __: str, event_dict:
     event_dict.setdefault("service", context.get("service", "app"))
     event_dict.setdefault("env", _environment())
     event_dict.setdefault("git_sha", _git_sha())
+    event_dict.setdefault("run_id", _run_id_ctx.get() or _boot_run_id)
     return event_dict
 
 

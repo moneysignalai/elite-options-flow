@@ -27,7 +27,7 @@ class AlertRouter:
             suppress, reason, cooldown_remaining = self.cooldown.should_suppress(cluster, score)
 
             evaluation_log = log.bind(
-                event="alert_evaluated",
+                stage="alert_evaluated",
                 ticker=cluster.underlying,
                 contract=cluster.option_symbol,
                 contract_id=cluster.option_symbol,
