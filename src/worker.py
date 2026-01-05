@@ -1,5 +1,7 @@
+import os
 import time
 import uuid
+from datetime import timezone
 
 from src.config import load_config
 from src.massive.client import MassiveClient
@@ -76,15 +78,39 @@ def main():
 
     log_event(log, "worker_start", universe_count=len(config.scan.tickers))
     while True:
+        if not config.scan.tickers:
+            log_event(
+                log,
+                "scan_config_invalid",
+                tickers=config.scan.tickers,
+                raw_tickers=os.getenv("SCAN_TICKERS", ""),
+            )
+            time.sleep(sleep_seconds(True, config.scan.scan_interval_seconds))
+            continue
+
         now = now_tz()
-        if not within_window(
+        is_open, window_reason = within_window(
             now,
             config.scan.rth_start,
             config.scan.rth_end,
             config.scan.enable_premarket,
             config.scan.enable_afterhours,
-        ):
-            log_event(log, "scan_skipped", now=now.isoformat(), reason="outside_window")
+        )
+        log_event(
+            log,
+            "market_window_check",
+            now_local=now.isoformat(),
+            now_utc=now.astimezone(timezone.utc).isoformat(),
+            market_tz="America/New_York",
+            rth_start=config.scan.rth_start,
+            rth_end=config.scan.rth_end,
+            enable_premarket=config.scan.enable_premarket,
+            enable_afterhours=config.scan.enable_afterhours,
+            is_open=is_open,
+            reason=window_reason,
+        )
+        if not is_open:
+            log_event(log, "scan_skipped", now=now.isoformat(), reason=window_reason)
             time.sleep(sleep_seconds(True, config.scan.scan_interval_seconds))
             continue
 
