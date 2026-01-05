@@ -232,7 +232,6 @@ def main():
         market_log_func = log.info if state_changed else log.debug
         market_log_func(
             "market_window_check",
-            event="market_window_check",
             now_local=now.isoformat(),
             now_utc=now.astimezone(timezone.utc).isoformat(),
             market_tz="America/New_York",
@@ -252,7 +251,6 @@ def main():
             skip_log_func = log.info if state_changed else log.debug
             skip_log_func(
                 "scan_skipped",
-                event="scan_skipped",
                 now=now.isoformat(),
                 reason=window_reason,
                 next_transition_local_iso=next_transition_local_iso,
