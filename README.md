@@ -85,14 +85,21 @@ python scripts/massive_smoke_test.py
 The smoke test calls contract search for `SPY` and exits `0` when contracts are returned.
 
 ## Environment Variables
-Copy `.env.example` to `.env` and fill in:
-- `MASSIVE_API_KEY`
-- `MASSIVE_BASE_URL`
-- `SCAN_TICKERS` (comma list of underlyings)
-- `CHAIN_DISCOVERY` (`reference` or `static`)
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (optional)
-- `DATABASE_URL` (optional Postgres connection string)
-- Additional tunables: window sizes, thresholds, market hours, cooldown.
+Minimal configuration required to boot:
+
+**Web**
+- `ENV=prod`
+- `LOG_LEVEL=INFO`
+- `MASSIVE_API_KEY` (required)
+- `MASSIVE_BASE_URL=https://api.massive.com`
+- `DATABASE_URL` (optional; enables Postgres persistence)
+- `SCAN_TICKERS` (optional comma list for status endpoint)
+
+**Worker**
+- All Web variables
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (optional; alerts disabled when missing)
+
+Additional tunables: discovery mode, aggression/cluster windows, thresholds, and market hours are read from corresponding env vars in `src/config.py`.
 
 ## Contract Discovery Modes
 - `CHAIN_DISCOVERY=reference` (default): uses Massive contract search endpoint to grab nearby contracts per underlying.

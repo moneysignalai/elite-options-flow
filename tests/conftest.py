@@ -11,7 +11,7 @@ from src.config import AppConfig, MassiveConfig, ScanConfig, TelegramConfig
 def mock_app_config() -> AppConfig:
     return AppConfig(
         massive=MassiveConfig(
-            api_key="",
+            api_key="test",
             base_url="https://api.massive.test",
             trades_path="",
             quotes_path="/v3/quotes/{options_ticker}",

@@ -22,6 +22,10 @@ class MassiveClient:
         self.client = httpx.Client(base_url=self.cfg.base_url, timeout=self.cfg.timeout)
         self.logger = logger or get_logger("app")
 
+        if not self.cfg.api_key:
+            log_event(self.logger, "config_invalid", missing=["MASSIVE_API_KEY"])
+            raise SystemExit(1)
+
     @staticmethod
     def _elapsed_ms(response: httpx.Response) -> float | None:
         try:
@@ -30,13 +34,32 @@ class MassiveClient:
             return None
 
     def _build_headers(self) -> Dict[str, str]:
-        if not self.cfg.api_key:
-            return {}
-
         mode = (self.cfg.headers_mode or "bearer").lower()
         if mode == "x-api-key":
             return {"x-api-key": self.cfg.api_key}
         return {"Authorization": f"Bearer {self.cfg.api_key}"}
+
+    def _response_preview(self, response: httpx.Response | None) -> str | None:
+        if response is None:
+            return None
+        try:
+            return (response.text or "")[:300]
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _json_safe(self, response: httpx.Response) -> Any:
+        try:
+            return response.json()
+        except Exception as exc:  # noqa: BLE001
+            log_massive_failure(
+                self.logger,
+                str(response.request.url),
+                params=None,
+                exc=exc,
+                status_code=response.status_code,
+                response_preview=self._response_preview(response),
+            )
+            return None
 
     def _build_contract_search_params(self, underlying: str, limit: int) -> Dict[str, Any]:
         params: Dict[str, Any] = {}
@@ -95,6 +118,54 @@ class MassiveClient:
 
         return [], top_level_keys, None
 
+    def _send_request(
+        self,
+        request: httpx.Request,
+        ticker: str | None = None,
+        option_contract: str | None = None,
+    ) -> httpx.Response | None:
+        url = str(request.url)
+        params = dict(request.url.params) if request.url.params else None
+        log_massive_request(
+            self.logger,
+            request.method,
+            url,
+            params=params,
+            ticker=ticker,
+            option_contract=option_contract,
+        )
+        try:
+            response = self.client.send(request)
+        except Exception as exc:  # noqa: BLE001
+            status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            preview = self._response_preview(exc.response) if isinstance(exc, httpx.HTTPStatusError) else None
+            log_massive_failure(
+                self.logger,
+                url,
+                params,
+                exc,
+                ticker=ticker,
+                option_contract=option_contract,
+                status_code=status_code,
+                response_preview=preview,
+            )
+            return None
+
+        if response.status_code != 200:
+            log_massive_failure(
+                self.logger,
+                url,
+                params,
+                exc=None,
+                ticker=ticker,
+                option_contract=option_contract,
+                status_code=response.status_code,
+                response_preview=self._response_preview(response),
+            )
+            return None
+
+        return response
+
     def _parse_contract_references(self, payload: List[dict]) -> List[models.OptionContractReference]:
         contracts: List[models.OptionContractReference] = []
         for entry in payload:
@@ -112,32 +183,16 @@ class MassiveClient:
         params = self._build_contract_search_params(underlying, limit)
         request = self.client.build_request("GET", path, headers=self.headers, params=params)
         url = str(request.url)
-        log_massive_request(self.logger, "GET", url, params=params, ticker=underlying)
-
-        try:
-            response = self.client.send(request)
-            response.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            status_code = None
-            if isinstance(exc, httpx.HTTPStatusError):
-                status_code = exc.response.status_code
-            log_massive_failure(
-                self.logger,
-                url,
-                params,
-                exc,
-                ticker=underlying,
-                status_code=status_code,
-            )
-            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404:
-                log_event(self.logger, "schema_mismatch", top_level_keys=None)
-                return []
-            raise
+        response = self._send_request(request, ticker=underlying)
+        if response is None:
+            return []
 
         elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
 
-        data = response.json()
+        data = self._json_safe(response)
+        if data is None:
+            return []
         payload, top_keys, inferred_key = self._extract_contract_candidates(data)
         contracts = self._parse_contract_references(payload)
 
@@ -178,29 +233,16 @@ class MassiveClient:
             params["limit"] = limit
 
         request = self.client.build_request("GET", path, headers=self.headers, params=params)
-        url = str(request.url)
-        log_massive_request(self.logger, "GET", url, params=params or None, ticker=underlying)
-
-        try:
-            response = self.client.send(request)
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            log_massive_failure(
-                self.logger,
-                url,
-                params or None,
-                exc,
-                ticker=underlying,
-                status_code=exc.response.status_code,
-            )
-            if exc.response.status_code in {403, 404}:
-                return []
-            raise
+        response = self._send_request(request, ticker=underlying)
+        if response is None:
+            return []
 
         elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
 
-        data = response.json()
+        data = self._json_safe(response)
+        if data is None:
+            return []
         payload, top_keys, inferred_key = self._extract_contract_candidates(data)
 
         if payload is not None and not isinstance(payload, list):
@@ -240,33 +282,16 @@ class MassiveClient:
     def get_option_quotes(self, options_ticker: str) -> List[models.OptionQuote]:
         path = self.cfg.quotes_path.format(options_ticker=options_ticker)
         request = self.client.build_request("GET", path, headers=self.headers)
-        url = str(request.url)
-        log_massive_request(self.logger, "GET", url, params=None, ticker=options_ticker)
-
-        try:
-            response = self.client.send(request)
-            response.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            status_code = None
-            if isinstance(exc, httpx.HTTPStatusError):
-                status_code = exc.response.status_code
-            log_massive_failure(
-                self.logger,
-                url,
-                None,
-                exc,
-                ticker=options_ticker,
-                status_code=status_code,
-            )
-            if status_code == 404:
-                log_event(self.logger, "schema_mismatch", top_level_keys=None)
-                return []
-            raise
+        response = self._send_request(request, ticker=options_ticker)
+        if response is None:
+            return []
 
         elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
 
-        data = response.json()
+        data = self._json_safe(response)
+        if data is None:
+            return []
         payload, top_keys, _ = self._extract_contract_candidates(data)
         if payload is not None and not isinstance(payload, list):
             log_event(self.logger, "schema_mismatch", top_level_keys=top_keys)
@@ -298,38 +323,16 @@ class MassiveClient:
 
         path = self.cfg.trades_path.format(options_ticker=options_ticker)
         request = self.client.build_request("GET", path, headers=self.headers)
-        url = str(request.url)
-        log_massive_request(self.logger, "GET", url, params=None, ticker=options_ticker)
-
-        try:
-            response = self.client.send(request)
-            response.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            status_code = None
-            if isinstance(exc, httpx.HTTPStatusError):
-                status_code = exc.response.status_code
-            log_massive_failure(
-                self.logger,
-                url,
-                None,
-                exc,
-                ticker=options_ticker,
-                status_code=status_code,
-            )
-            if status_code == 404:
-                log_event(
-                    self.logger,
-                    "trades_endpoint_unavailable",
-                    ticker=options_ticker,
-                    status_code=status_code,
-                )
-                return []
-            raise
+        response = self._send_request(request, ticker=options_ticker)
+        if response is None:
+            return []
 
         elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
 
-        data = response.json()
+        data = self._json_safe(response)
+        if data is None:
+            return []
         payload, top_keys, _ = self._extract_contract_candidates(data)
         if payload is not None and not isinstance(payload, list):
             log_event(self.logger, "schema_mismatch", top_level_keys=top_keys)
@@ -380,43 +383,17 @@ class MassiveClient:
             options_ticker=option_symbol,
         )
         request = self.client.build_request("GET", path, headers=self.headers)
-        url = str(request.url)
-        log_massive_request(
-            self.logger,
-            "GET",
-            url,
-            ticker=underlying,
-            option_contract=option_symbol,
+        response = self._send_request(
+            request, ticker=underlying, option_contract=option_symbol
         )
-
-        try:
-            response = self.client.send(request)
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            log_massive_failure(
-                self.logger,
-                url,
-                None,
-                exc,
-                ticker=underlying,
-                option_contract=option_symbol,
-                status_code=exc.response.status_code,
-            )
-            if exc.response.status_code in {403, 404}:
-                if exc.response.status_code == 404:
-                    log_event(
-                        self.logger,
-                        "trades_endpoint_unavailable",
-                        ticker=underlying,
-                        option_contract=option_symbol,
-                        status_code=exc.response.status_code,
-                    )
-                return None
-            raise
+        if response is None:
+            return None
 
         elapsed_ms = self._elapsed_ms(response)
         content_type = response.headers.get("content-type")
-        data = response.json()
+        data = self._json_safe(response)
+        if data is None:
+            return None
 
         payload = data.get("snapshot") or data.get("result") or data.get("data") or data
         if isinstance(payload, list) and payload:
@@ -438,16 +415,14 @@ class MassiveClient:
             )
             return None
 
-        try:
-            snapshot = models.OptionSnapshot.from_snapshot_payload(payload)
-        except Exception as exc:  # noqa: BLE001
-            log_massive_failure(
+        snapshot = models.OptionSnapshot.from_snapshot_payload(payload, logger=self.logger)
+        if snapshot is None:
+            log_event(
                 self.logger,
-                url,
-                None,
-                exc,
+                "contract_snapshot_missing",
                 ticker=underlying,
                 option_contract=option_symbol,
+                top_level_keys=list(payload.keys()),
             )
             return None
 

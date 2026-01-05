@@ -3,6 +3,9 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
+from src.massive.opra import parse_opra_symbol
+from src.utils.logging import get_logger, log_event
+
 
 class OptionTrade(BaseModel):
     option_symbol: str
@@ -69,7 +72,8 @@ class OptionSnapshot(BaseModel):
         )
 
     @classmethod
-    def from_snapshot_payload(cls, payload: dict) -> "OptionSnapshot":
+    def from_snapshot_payload(cls, payload: dict, logger=None) -> "OptionSnapshot | None":
+        log = logger or get_logger("app")
         option_symbol = (
             payload.get("option_symbol")
             or payload.get("optionSymbol")
@@ -86,14 +90,34 @@ class OptionSnapshot(BaseModel):
             or payload.get("ticker_root")
             or ""
         )
+        parsed_symbol = parse_opra_symbol(option_symbol) if option_symbol else None
+        if not parsed_symbol and option_symbol:
+            log_event(log, "opra_parse_failed", option_symbol=option_symbol)
+
         expiry = payload.get("expiry") or payload.get("expiration") or payload.get("expiration_date")
         strike = payload.get("strike") or payload.get("strike_price")
         call_put = payload.get("call_put") or payload.get("type") or payload.get("option_type")
+
+        if parsed_symbol:
+            expiry = expiry or parsed_symbol["expiry"]
+            strike = strike or parsed_symbol["strike"]
+            call_put = call_put or parsed_symbol["call_put"]
         oi = payload.get("oi") or payload.get("open_interest")
         iv = payload.get("iv") or payload.get("implied_volatility")
         delta = payload.get("delta")
         gamma = payload.get("gamma")
         underlying_price = payload.get("underlying_price") or payload.get("underlyingPrice")
+
+        missing_fields = [name for name, value in (("expiry", expiry), ("strike", strike)) if value is None]
+        if missing_fields:
+            log_event(
+                log,
+                "massive_quote_missing_fields",
+                option_symbol=option_symbol,
+                missing_fields=missing_fields,
+                top_level_keys=list(payload.keys()),
+            )
+            return None
 
         normalized = {
             "option_symbol": option_symbol,
@@ -111,7 +135,17 @@ class OptionSnapshot(BaseModel):
         last_trade = cls._parse_last_trade(payload.get("last_trade"), option_symbol, underlying)
         last_quote = cls._parse_last_quote(payload.get("last_quote"), option_symbol)
 
-        return cls(**normalized, last_trade=last_trade, last_quote=last_quote)
+        try:
+            return cls(**normalized, last_trade=last_trade, last_quote=last_quote)
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                log,
+                "contract_snapshot_invalid",
+                option_symbol=option_symbol,
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+            )
+            return None
 
 
 class OptionContractReference(BaseModel):
