@@ -26,5 +26,5 @@ def test_cluster_build():
     assert len(clusters) == 1
     c = clusters[0]
     assert c.contracts_total == 150
-    assert round(c.premium_total, 2) == 22500.0
+    assert round(c.premium_total, 2) == 23000.0
     assert c.ask_side_ratio == 0

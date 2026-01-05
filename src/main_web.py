@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
+import time
+import uuid
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from datetime import datetime
 
 from src.config import load_config
-from src.logging_setup import configure_logging, get_logger
 from src.storage.db import init_engine, get_session_factory
 from src.storage.repository import AlertRepository
 from src.messaging.telegram import TelegramMessenger
@@ -17,9 +19,9 @@ from src.engine.templates import render_alert
 from src.engine.classify import classify_cluster
 from src.engine.score import score_cluster
 from src.utils.time import now_tz
+from src.utils.logging import get_logger, set_request_id, log_error
 
-configure_logging()
-logger = get_logger()
+logger = get_logger("web")
 config = load_config()
 
 # setup repo
@@ -27,16 +29,43 @@ session_factory = None
 if config.database_url:
     engine = init_engine(config.database_url)
     session_factory = get_session_factory(engine)
-repo = AlertRepository(session_factory=session_factory)
-messenger = TelegramMessenger(config.telegram.bot_token, config.telegram.chat_id)
+else:
+    logger.info("db_disabled", event="db_disabled")
+repo = AlertRepository(session_factory=session_factory, logger=logger)
+messenger = TelegramMessenger(config.telegram.bot_token, config.telegram.chat_id, logger=logger)
 cooldown = CooldownManager(config.scan.cooldown_minutes)
-massive_client = MassiveClient(config)
+massive_client = MassiveClient(config, logger=logger)
 discovery = ContractDiscovery(massive_client, config.scan.chain_discovery)
 matcher = TradeQuoteMatcher(config.scan.aggression_window_seconds)
 cluster_builder = ClusterBuilder(config.scan.cluster_window_seconds)
-router = AlertRouter(repo, messenger, cooldown, config)
+router = AlertRouter(repo, messenger, cooldown, config, logger=logger)
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    request_id = uuid.uuid4().hex[:8]
+    set_request_id(request_id)
+    request_log = logger.bind(request_id=request_id, path=request.url.path, method=request.method)
+    request.state.logger = request_log
+    request.state.request_id = request_id
+    start = time.time()
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # noqa: BLE001
+        log_error(request_log, "request_handler", exc)
+        set_request_id(None)
+        raise
+    latency_ms = int((time.time() - start) * 1000)
+    request_log.info(
+        "request_complete",
+        event="request_complete",
+        status_code=response.status_code,
+        latency_ms=latency_ms,
+    )
+    set_request_id(None)
+    return response
 
 
 @app.get("/health")
@@ -60,13 +89,14 @@ async def recent_alerts(limit: int = 100):
 
 
 @app.post("/debug/force-alert")
-async def force_alert(ticker: str):
+async def force_alert(ticker: str, request: Request):
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker required")
     # simple flow: use discovery to get contracts and process first
     contracts = discovery.contracts_for(ticker)
     if not contracts:
         return JSONResponse({"status": "suppressed", "reason": "no_contracts"})
+    request_log = getattr(request.state, "logger", logger)
     option_symbol = contracts[0]
     trades = massive_client.get_option_trades(option_symbol)
     quotes = massive_client.get_option_quotes(option_symbol)
@@ -77,12 +107,15 @@ async def force_alert(ticker: str):
         clusters,
         gamma_dte_max=config.scan.gamma_dte_max,
         structural_dte_min=config.scan.structural_dte_min,
+        logger=request_log,
     )
     return result
 
 
 @app.post("/admin/reload-config")
-async def reload_config():
+async def reload_config(request: Request):
     global config
     config = load_config()
+    req_log = getattr(request.state, "logger", logger)
+    req_log.info("config_reloaded", event="config_reloaded", tickers=config.scan.tickers)
     return {"status": "reloaded", "tickers": config.scan.tickers}

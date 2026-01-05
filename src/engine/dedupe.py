@@ -11,16 +11,17 @@ class CooldownManager:
         self.cooldown = timedelta(minutes=cooldown_minutes)
         self.cache: Dict[str, dict] = {}
 
-    def should_suppress(self, cluster, score: float) -> tuple[bool, str]:
+    def should_suppress(self, cluster, score: float) -> tuple[bool, str, float | None]:
         key = cluster_key(cluster)
         state = self.cache.get(key)
         now = datetime.utcnow()
         if not state:
             self.cache[key] = {"ts": now, "score": score, "premium": cluster.premium_total}
-            return False, "new"
+            return False, "new", None
         delta = now - state["ts"]
         improved = score >= state["score"] + 1.0 or cluster.premium_total >= state["premium"] * 2
         if delta < self.cooldown and not improved:
-            return True, "cooldown"
+            remaining = max(self.cooldown - delta, timedelta(seconds=0)).total_seconds()
+            return True, "cooldown", remaining
         self.cache[key] = {"ts": now, "score": score, "premium": cluster.premium_total}
-        return False, "refresh"
+        return False, "refresh", None

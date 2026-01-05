@@ -1,14 +1,16 @@
-from loguru import logger
 from telegram import Bot
+
+from src.utils.logging import get_logger, log_error
 
 
 class TelegramMessenger:
-    def __init__(self, token: str | None, chat_id: str | None):
+    def __init__(self, token: str | None, chat_id: str | None, logger=None):
         self.enabled = bool(token and chat_id)
         self.chat_id = chat_id
         self.bot = Bot(token) if self.enabled else None
+        self.logger = logger or get_logger("app")
         if not self.enabled:
-            logger.info("messaging disabled", reason="missing_token_or_chat_id")
+            self.logger.info("messaging disabled", event="messaging_disabled", reason="missing_token_or_chat_id")
 
     def send(self, payload: dict):
         if not self.enabled:
@@ -17,7 +19,7 @@ class TelegramMessenger:
         try:
             self.bot.send_message(chat_id=self.chat_id, text=message)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("telegram send failed", error=str(exc))
+            log_error(self.logger, "telegram_send", exc)
 
     def _format(self, payload: dict) -> str:
         lines = [

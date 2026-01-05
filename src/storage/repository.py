@@ -1,17 +1,21 @@
 import json
+import time
 from datetime import datetime
 from collections import deque
 from typing import List
+
+from src.utils.logging import get_logger, log_error
 
 from src.storage import models
 from src.engine.dedupe import cluster_key
 
 
 class AlertRepository:
-    def __init__(self, session_factory=None, memory_limit: int = 500):
+    def __init__(self, session_factory=None, memory_limit: int = 500, logger=None):
         self.session_factory = session_factory
         self.memory_alerts = deque(maxlen=memory_limit)
         self.memory_dedupe = {}
+        self.logger = logger or get_logger("app")
 
     def save_alert(self, cluster, setup: str, score: float, components: dict, tags: list, template: str):
         key = cluster_key(cluster)
@@ -41,6 +45,7 @@ class AlertRepository:
         }
         if self.session_factory:
             session = self.session_factory()
+            start = time.time()
             try:
                 alert = models.Alert(
                     ts=record["ts"],
@@ -76,7 +81,19 @@ class AlertRepository:
                     )
                 )
                 session.commit()
+                duration_ms = int((time.time() - start) * 1000)
+                self.logger.info(
+                    "db_write",
+                    event="db_write",
+                    table="alerts",
+                    alert_id=alert.id,
+                    duration_ms=duration_ms,
+                    success=True,
+                )
                 return alert.id
+            except Exception as exc:  # noqa: BLE001
+                log_error(self.logger, "save_alert", exc)
+                raise
             finally:
                 session.close()
         else:
