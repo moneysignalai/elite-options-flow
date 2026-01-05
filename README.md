@@ -101,6 +101,14 @@ Minimal configuration required to boot:
 
 Additional tunables: discovery mode, aggression/cluster windows, thresholds, and market hours are read from corresponding env vars in `src/config.py`.
 
+Cooldown and quotes fallback controls:
+- `ALERT_COOLDOWN_SECONDS` / `COOLDOWN_MINUTES` – base cooldown window (seconds overrides minutes).
+- `COOLDOWN_SCOPE` – `contract` (default), `strategy`, or `ticker` keying for cooldown lookups.
+- `ALLOW_ONE_ALERT_PER_TICKER` – if `true`, only the first qualifying contract per ticker per scan is sent.
+- `QUOTES_MODE_SCORE_PENALTY` – multiplier applied to scores when running in quotes fallback mode (default `0.75`).
+- `QUOTES_MODE_NOTIONAL_CAP` – hard ceiling for quote-derived notional estimates (default `250000`).
+- `QUOTES_MODE_REQUIRE_MIN_OI` – minimum OI needed to admit quotes-only clusters when OI is known (default `50`).
+
 ## Contract Discovery Modes
 - `CHAIN_DISCOVERY=reference` (default): uses Massive contract search endpoint to grab nearby contracts per underlying.
 - `CHAIN_DISCOVERY=static`: provide a JSON mapping in code or env (extend `ContractDiscovery` initialization) with explicit option symbols per underlying.

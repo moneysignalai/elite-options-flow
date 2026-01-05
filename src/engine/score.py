@@ -2,14 +2,15 @@ from typing import Dict
 from src.engine.cluster import FlowCluster
 
 
-def score_cluster(cluster: FlowCluster) -> tuple[float, Dict[str, float], list[str]]:
+def score_cluster(cluster: FlowCluster, quotes_penalty: float = 0.75) -> tuple[float, Dict[str, float], list[str]]:
     components = {}
     tags = []
     # size/premium
     premium_score = min(4.0, cluster.premium_total / 250000)
     components["size"] = premium_score
     # vol vs oi
-    vol_oi_ratio = cluster.contracts_total / max(cluster.oi or cluster.contracts_total, 1)
+    oi_denominator = cluster.oi if (cluster.oi or 0) > 0 else max(cluster.contracts_total, 1)
+    vol_oi_ratio = cluster.contracts_total / oi_denominator
     components["vol_oi"] = min(2.0, vol_oi_ratio)
     # aggression
     components["aggression"] = cluster.ask_side_ratio * 2
@@ -36,6 +37,8 @@ def score_cluster(cluster: FlowCluster) -> tuple[float, Dict[str, float], list[s
         tags.append("quote_based")
 
     total = sum(components.values())
+    if cluster.data_mode == "quotes_fallback":
+        total *= quotes_penalty
     if total > 10:
         total = 10.0
     return total, components, tags

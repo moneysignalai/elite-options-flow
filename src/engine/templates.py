@@ -21,7 +21,9 @@ def render_alert(cluster, setup: str, score: float, components: dict, tags: list
         "premium_total": round(cluster.premium_total, 2),
         "contracts_total": cluster.contracts_total,
         "aggression": round(cluster.ask_side_ratio, 2),
-        "vol_oi": cluster.contracts_total / max(cluster.oi or cluster.contracts_total, 1),
+        "vol_oi": cluster.contracts_total
+        / max(cluster.oi if (cluster.oi or 0) > 0 else cluster.contracts_total, 1),
         "mode": cluster.data_mode,
+        "notional_basis": getattr(cluster, "notional_basis", None),
         "tags": tags,
     }

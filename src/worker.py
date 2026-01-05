@@ -76,7 +76,7 @@ def run_once(
             clusters = cluster_builder.build(labeled, snapshot)
         else:
             fallback_cluster = cluster_builder.build_snapshot_cluster(
-                snapshot, quotes, mode="snapshot" if mode == "snapshot" else "quotes"
+                snapshot, quotes, mode=mode
             )
             clusters = [fallback_cluster] if fallback_cluster else []
             if not fallback_cluster:
@@ -97,6 +97,7 @@ def run_once(
                 top_cluster_notional=top_cluster.premium_total,
                 top_cluster_trades=top_cluster.prints_count,
                 mode=top_cluster.data_mode,
+                notional_basis=getattr(top_cluster, "notional_basis", None),
             )
     log.info(
         "cluster_build",
@@ -106,6 +107,16 @@ def run_once(
     )
     result = router.process_clusters(
         clusters_accum, config.scan.gamma_dte_max, config.scan.structural_dte_min, log
+    )
+    log_event(
+        log,
+        "alert_summary",
+        ticker=ticker,
+        qualifying_count=result.get("qualifying", 0),
+        sent_count=result.get("sent", 0),
+        suppressed_below_threshold_count=result.get("suppressed_below_threshold", 0),
+        suppressed_cooldown_count=result.get("suppressed_cooldown", 0),
+        suppressed_quota_count=result.get("suppressed_quota", 0),
     )
     top_premium = max([c.premium_total for c in clusters_accum], default=0)
     log.info(
@@ -123,8 +134,14 @@ def main():
     client = MassiveClient(config, logger=log)
     discovery = ContractDiscovery(client, config.scan.chain_discovery)
     matcher = TradeQuoteMatcher(config.scan.aggression_window_seconds)
-    cluster_builder = ClusterBuilder(config.scan.cluster_window_seconds)
-    cooldown = CooldownManager(config.scan.cooldown_minutes)
+    cluster_builder = ClusterBuilder(
+        config.scan.cluster_window_seconds,
+        quotes_notional_cap=config.scan.quotes_mode_notional_cap,
+        quotes_min_oi=config.scan.quotes_mode_require_min_oi,
+    )
+    cooldown = CooldownManager(
+        config.scan.alert_cooldown_seconds, scope=config.scan.cooldown_scope
+    )
     messenger = TelegramMessenger(config.telegram.bot_token, config.telegram.chat_id, logger=log)
 
     session_factory = None

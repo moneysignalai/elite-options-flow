@@ -29,8 +29,14 @@ def main():
     client = MassiveClient(config, logger=log)
     discovery = ContractDiscovery(client, config.scan.chain_discovery)
     matcher = TradeQuoteMatcher(config.scan.aggression_window_seconds)
-    cluster_builder = ClusterBuilder(config.scan.cluster_window_seconds)
-    cooldown = CooldownManager(config.scan.cooldown_minutes)
+    cluster_builder = ClusterBuilder(
+        config.scan.cluster_window_seconds,
+        quotes_notional_cap=config.scan.quotes_mode_notional_cap,
+        quotes_min_oi=config.scan.quotes_mode_require_min_oi,
+    )
+    cooldown = CooldownManager(
+        config.scan.alert_cooldown_seconds, scope=config.scan.cooldown_scope
+    )
     messenger = TelegramMessenger(config.telegram.bot_token, config.telegram.chat_id, logger=log)
 
     session_factory = None
