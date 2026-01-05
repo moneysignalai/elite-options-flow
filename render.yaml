@@ -7,26 +7,20 @@ services:
     plan: starter
     region: oregon
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "bash start_web.sh"
+    startCommand: "PYTHONPATH=. python -m uvicorn src.main_web:app --host 0.0.0.0 --port 8000"
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11.9"
+      - key: ENV
+        value: "prod"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: MASSIVE_BASE_URL
+        value: "https://api.massive.com"
       - key: MASSIVE_API_KEY
-        sync: false
-      - key: SCAN_TICKERS
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
         sync: false
       - key: DATABASE_URL
         sync: false
-      - key: ENABLE_POSTGRES
-        value: "false"
-      - key: ENABLE_PREMARKET
-        value: "false"
-      - key: ENABLE_AFTERHOURS
-        value: "false"
+      - key: SCAN_TICKERS
+        sync: false
     healthCheckPath: /health
     autoDeploy: true
 
@@ -38,11 +32,17 @@ services:
     plan: starter
     region: oregon
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "bash start_worker.sh"
+    startCommand: "PYTHONPATH=. alembic upgrade head && PYTHONPATH=. python -m src.worker"
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11.9"
+      - key: ENV
+        value: "prod"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: MASSIVE_BASE_URL
+        value: "https://api.massive.com"
       - key: MASSIVE_API_KEY
+        sync: false
+      - key: DATABASE_URL
         sync: false
       - key: SCAN_TICKERS
         sync: false
@@ -50,11 +50,3 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: ENABLE_POSTGRES
-        value: "false"
-      - key: ENABLE_PREMARKET
-        value: "false"
-      - key: ENABLE_AFTERHOURS
-        value: "false"

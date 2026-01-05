@@ -168,11 +168,14 @@ def log_massive_failure(
     logger: structlog.stdlib.BoundLogger,
     url: str,
     params: dict[str, Any] | None,
-    exc: Exception,
+    exc: Exception | None,
     ticker: str | None = None,
     option_contract: str | None = None,
     status_code: int | None = None,
+    response_preview: str | None = None,
 ) -> None:
+    exception_type = type(exc).__name__ if exc else None
+    exception_message = str(exc) if exc else None
     log_event(
         logger,
         "massive_error",
@@ -181,6 +184,7 @@ def log_massive_failure(
         ticker=ticker,
         option_contract=option_contract,
         status_code=status_code,
-        exception_type=type(exc).__name__,
-        exception_message=str(exc),
+        exception_type=exception_type,
+        exception_message=exception_message,
+        response_preview=response_preview,
     )
