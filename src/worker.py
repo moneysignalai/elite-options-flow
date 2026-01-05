@@ -27,16 +27,8 @@ def run_once(
     config,
     log,
 ):
-    log_event(log, "ticker_start", ticker=ticker)
     contracts = discovery.contracts_for(ticker)
     contracts_discovered = len(contracts)
-    log_event(log, "contracts_discovered", ticker=ticker, contracts_count=contracts_discovered)
-    log_event(
-        log,
-        "snapshot_summary",
-        ticker=ticker,
-        returned_count=len(contracts),
-    )
     if not contracts:
         log_event(log, "candidates", trades=0, contracts=0, ticker=ticker)
         log.info(
@@ -151,7 +143,7 @@ def run_once(
             lookback_start_iso=start_window.isoformat(),
             lookback_end_iso=now.isoformat(),
         )
-    log.info(
+    log.debug(
         "cluster_build",
         ticker=ticker,
         candidates=len(contracts),
@@ -187,16 +179,18 @@ def run_once(
             reason = "no_snapshots"
         elif trades_fetched == 0:
             reason = "no_trades"
+        elif clusters_built == 0:
+            reason = "no_clusters"
         elif alerts_deduped:
             reason = "cooldown"
         elif result.get("suppressed_quota", 0):
             reason = "quota"
         elif result.get("suppressed_below_threshold", 0) >= clusters_built:
             reason = "below_threshold"
-    log.info(
-        "ticker_scan_summary",
+    summary_fields = dict(
         ticker=ticker,
         contracts_discovered=contracts_discovered,
+        contracts_after_filters=contracts_discovered,
         snapshots_fetched=snapshots_fetched,
         snapshots_missing=snapshots_missing,
         trades_fetched=trades_fetched,
@@ -204,13 +198,13 @@ def run_once(
         clusters_scored=clusters_scored,
         alerts_sent=alerts_sent,
         alerts_suppressed=alerts_suppressed,
-        alerts_suppressed_below_threshold=result.get("suppressed_below_threshold", 0),
-        alerts_suppressed_quota=result.get("suppressed_quota", 0),
         alerts_deduped=alerts_deduped,
-        reason=reason,
     )
+    if reason:
+        summary_fields["reason"] = reason
+    log.info("ticker_scan_summary", **summary_fields)
     top_premium = max([c.premium_total for c in clusters_accum], default=0)
-    log.info(
+    log.debug(
         "scoring",
         ticker=ticker,
         top_score=top_premium,
@@ -245,8 +239,7 @@ def main():
     router = AlertRouter(repo, messenger, cooldown, config, logger=log)
 
     log_event(log, "worker_start", universe_count=len(config.scan.tickers))
-    last_is_open: bool | None = None
-    last_window_reason: str | None = None
+    last_market_state: tuple[bool, str, str] | None = None
     while True:
         if not config.scan.tickers:
             log_event(
@@ -275,14 +268,12 @@ def main():
         next_scan_in_seconds = sleep_seconds(
             outside=not is_open, interval=config.scan.scan_interval_seconds
         )
-        state_changed = (
-            last_is_open is None
-            or is_open != last_is_open
-            or window_reason != last_window_reason
-        )
+        current_state = (is_open, window_reason, next_transition_local_iso)
+        state_changed = current_state != last_market_state
+        market_event = "market_window_state_change" if state_changed else "market_window_check"
         market_log_func = log.info if state_changed else log.debug
         market_log_func(
-            "market_window_check",
+            market_event,
             now_local=now.isoformat(),
             now_utc=now.astimezone(timezone.utc).isoformat(),
             market_tz="America/New_York",
@@ -296,18 +287,17 @@ def main():
             seconds_until_transition=seconds_until_transition,
             next_scan_in_seconds=next_scan_in_seconds,
         )
-        last_is_open = is_open
-        last_window_reason = window_reason
+        last_market_state = current_state
         if not is_open:
-            skip_log_func = log.info if state_changed else log.debug
-            skip_log_func(
-                "scan_skipped",
-                now=now.isoformat(),
-                reason=window_reason,
-                next_transition_local_iso=next_transition_local_iso,
-                seconds_until_transition=seconds_until_transition,
-                next_scan_in_seconds=next_scan_in_seconds,
-            )
+            if state_changed:
+                log.info(
+                    "scan_skipped",
+                    now=now.isoformat(),
+                    reason=window_reason,
+                    next_transition_local_iso=next_transition_local_iso,
+                    seconds_until_transition=seconds_until_transition,
+                    next_scan_in_seconds=next_scan_in_seconds,
+                )
             time.sleep(next_scan_in_seconds)
             continue
 
