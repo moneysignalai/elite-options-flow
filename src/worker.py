@@ -29,7 +29,8 @@ def run_once(
 ):
     log_event(log, "ticker_start", ticker=ticker)
     contracts = discovery.contracts_for(ticker)
-    log_event(log, "contracts_discovered", ticker=ticker, contracts_count=len(contracts))
+    contracts_discovered = len(contracts)
+    log_event(log, "contracts_discovered", ticker=ticker, contracts_count=contracts_discovered)
     log_event(
         log,
         "snapshot_summary",
@@ -38,22 +39,43 @@ def run_once(
     )
     if not contracts:
         log_event(log, "candidates", trades=0, contracts=0, ticker=ticker)
+        log.info(
+            "ticker_scan_summary",
+            ticker=ticker,
+            contracts_discovered=contracts_discovered,
+            snapshots_fetched=0,
+            snapshots_missing=0,
+            trades_fetched=0,
+            clusters_built=0,
+            clusters_scored=0,
+            alerts_sent=0,
+            alerts_suppressed=0,
+            alerts_suppressed_below_threshold=0,
+            alerts_suppressed_quota=0,
+            alerts_deduped=0,
+            reason="no_contracts",
+        )
         return {"clusters": 0, "sent": 0, "suppressed": 0}
     clusters_accum = []
+    snapshots_fetched = 0
+    snapshots_missing = 0
+    trades_fetched = 0
     now = now_tz()
     start_window = now - timedelta(minutes=config.scan.max_lookback_minutes)
     for option_symbol in contracts:
         snapshot = client.get_contract_snapshot(ticker, option_symbol)
         if not snapshot:
-            log_event(
-                log,
+            snapshots_missing += 1
+            log.debug(
                 "contract_snapshot_missing",
                 ticker=ticker,
                 option_symbol=option_symbol,
                 mode="snapshot_lookup",
             )
             continue
+        snapshots_fetched += 1
         trades = client.get_option_trades(option_symbol, start_window, now)
+        trades_fetched += len(trades)
         quotes = [snapshot.last_quote] if snapshot.last_quote else []
         has_snapshot_signal = bool(snapshot.last_trade or snapshot.day_volume or snapshot.oi)
         mode = "trades" if trades else "quotes_fallback"
@@ -66,8 +88,7 @@ def run_once(
         )
         if not quotes:
             quotes = client.get_option_quotes(option_symbol)
-        log_event(
-            log,
+        log.debug(
             "contract_data_fetched",
             ticker=ticker,
             option_symbol=option_symbol,
@@ -77,8 +98,7 @@ def run_once(
             snapshot_day_volume=snapshot.day_volume,
             snapshot_oi=snapshot.oi,
         )
-        log_event(
-            log,
+        log.debug(
             "contract_mode_selected",
             ticker=ticker,
             option_symbol=option_symbol,
@@ -90,8 +110,7 @@ def run_once(
             oi=snapshot.oi,
         )
         if not trades:
-            log_event(
-                log,
+            log.debug(
                 "quotes_fallback_used",
                 ticker=ticker,
                 option_symbol=option_symbol,
@@ -106,8 +125,7 @@ def run_once(
             )
             clusters = [fallback_cluster] if fallback_cluster else []
             if not fallback_cluster:
-                log_event(
-                    log,
+                log.debug(
                     "no_trades_for_contract",
                     ticker=ticker,
                     option_symbol=option_symbol,
@@ -115,8 +133,7 @@ def run_once(
         clusters_accum.extend([c for c in clusters if c])
         if clusters:
             top_cluster = max(clusters, key=lambda c: c.premium_total)
-            log_event(
-                log,
+            log.debug(
                 "cluster_summary",
                 option_symbol=option_symbol,
                 clusters_built=len(clusters),
@@ -125,8 +142,7 @@ def run_once(
                 mode=top_cluster.data_mode,
                 notional_basis=getattr(top_cluster, "notional_basis", None),
             )
-        log_event(
-            log,
+        log.debug(
             "clusters_built",
             ticker=ticker,
             option_symbol=option_symbol,
@@ -157,6 +173,41 @@ def run_once(
             "quota": result.get("suppressed_quota", 0),
         },
         qualifying=result.get("qualifying", 0),
+    )
+    alerts_sent = result.get("sent", 0)
+    alerts_suppressed = result.get("suppressed", 0)
+    alerts_deduped = result.get("suppressed_cooldown", 0)
+    clusters_built = len(clusters_accum)
+    clusters_scored = clusters_built
+    reason = None
+    if alerts_sent == 0:
+        if contracts_discovered == 0:
+            reason = "no_contracts"
+        elif snapshots_fetched == 0:
+            reason = "no_snapshots"
+        elif trades_fetched == 0:
+            reason = "no_trades"
+        elif alerts_deduped:
+            reason = "cooldown"
+        elif result.get("suppressed_quota", 0):
+            reason = "quota"
+        elif result.get("suppressed_below_threshold", 0) >= clusters_built:
+            reason = "below_threshold"
+    log.info(
+        "ticker_scan_summary",
+        ticker=ticker,
+        contracts_discovered=contracts_discovered,
+        snapshots_fetched=snapshots_fetched,
+        snapshots_missing=snapshots_missing,
+        trades_fetched=trades_fetched,
+        clusters_built=clusters_built,
+        clusters_scored=clusters_scored,
+        alerts_sent=alerts_sent,
+        alerts_suppressed=alerts_suppressed,
+        alerts_suppressed_below_threshold=result.get("suppressed_below_threshold", 0),
+        alerts_suppressed_quota=result.get("suppressed_quota", 0),
+        alerts_deduped=alerts_deduped,
+        reason=reason,
     )
     top_premium = max([c.premium_total for c in clusters_accum], default=0)
     log.info(
