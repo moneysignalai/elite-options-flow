@@ -1,2 +1,43 @@
 import sys, os
+
+import pytest
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.config import AppConfig, MassiveConfig, ScanConfig, TelegramConfig
+
+
+@pytest.fixture
+def mock_app_config() -> AppConfig:
+    return AppConfig(
+        massive=MassiveConfig(
+            api_key="",
+            base_url="https://api.massive.test",
+            trades_path="/options/trades?symbol={option_symbol}",
+            quotes_path="/options/quotes?symbol={option_symbol}",
+            snapshot_path="/options/snapshot?symbol={option_symbol}",
+            contract_search_path="/options/contracts?underlying={underlying}",
+            timeout=5.0,
+        ),
+        scan=ScanConfig(
+            tickers=[],
+            chain_discovery="reference",
+            enable_premarket=False,
+            enable_afterhours=False,
+            scan_interval_seconds=30,
+            rth_start="09:30",
+            rth_end="16:00",
+            aggression_window_seconds=120,
+            cluster_window_seconds=90,
+            max_lookback_minutes=5,
+            gamma_dte_max=3,
+            structural_dte_min=30,
+            alert_score_threshold=6.0,
+            deep_dive_threshold=9.0,
+            medium_threshold=7.0,
+            cooldown_minutes=30,
+        ),
+        telegram=TelegramConfig(bot_token=None, chat_id=None),
+        database_url=None,
+        enable_postgres=False,
+    )
