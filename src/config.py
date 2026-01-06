@@ -84,6 +84,7 @@ class AppConfig:
     telegram: TelegramConfig
     database_url: str | None
     enable_postgres: bool
+    dry_run_ignore_market_window: bool
 
 
 
@@ -154,6 +155,7 @@ def load_config() -> AppConfig:
         telegram=telegram,
         database_url=database_url if database_url else None,
         enable_postgres=_bool("ENABLE_POSTGRES", False),
+        dry_run_ignore_market_window=_bool("DRY_RUN_IGNORE_MARKET_WINDOW", False),
     )
 
 

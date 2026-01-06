@@ -17,7 +17,14 @@ class AlertRouter:
         self.config = config
         self.logger = logger or get_logger("app")
 
-    def process_clusters(self, clusters: List, gamma_dte_max: int, structural_dte_min: int, logger=None) -> dict:
+    def process_clusters(
+        self,
+        clusters: List,
+        gamma_dte_max: int,
+        structural_dte_min: int,
+        logger=None,
+        send_alerts: bool = True,
+    ) -> dict:
         log = logger or self.logger
         sent = 0
         suppressed = 0
@@ -100,22 +107,37 @@ class AlertRouter:
                     "medium": self.config.scan.medium_threshold,
                 },
             )
-            alert_id = self.repo.save_alert(cluster, setup, score, components, tags, payload["template"])
-            self.messenger.send(payload)
-            self.cooldown.mark_sent(cluster, score)
-            sent += 1
-            if self.config.scan.allow_one_alert_per_ticker:
-                sent_for_ticker = True
-            evaluation_log.info(
-                "alert sent",
-                decision="send",
-                suppress_reason=None,
-                cooldown_remaining_seconds=None,
-                alert_id=alert_id,
-                score=score,
-                setup=setup,
-                template=payload["template"],
-            )
+            if send_alerts:
+                alert_id = self.repo.save_alert(
+                    cluster, setup, score, components, tags, payload["template"]
+                )
+                self.messenger.send(payload)
+                self.cooldown.mark_sent(cluster, score)
+                sent += 1
+                if self.config.scan.allow_one_alert_per_ticker:
+                    sent_for_ticker = True
+                evaluation_log.info(
+                    "alert sent",
+                    decision="send",
+                    suppress_reason=None,
+                    cooldown_remaining_seconds=None,
+                    alert_id=alert_id,
+                    score=score,
+                    setup=setup,
+                    template=payload["template"],
+                )
+            else:
+                suppressed += 1
+                evaluation_log.info(
+                    "alert skipped",
+                    decision="skip",
+                    suppress_reason="dry_run",
+                    cooldown_remaining_seconds=None,
+                    alert_id=None,
+                    score=score,
+                    setup=setup,
+                    template=payload["template"],
+                )
         return {
             "sent": sent,
             "suppressed": suppressed,
