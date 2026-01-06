@@ -290,7 +290,7 @@ def main():
         last_market_state = current_state
         if not is_open:
             if state_changed:
-                log.info(
+                log.debug(
                     "scan_skipped",
                     now=now.isoformat(),
                     reason=window_reason,
