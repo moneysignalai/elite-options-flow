@@ -309,15 +309,6 @@ def main():
             )
             is_dry_run = config.dry_run_ignore_market_window and not is_open
             if not run_scan:
-                if state_changed:
-                    log.debug(
-                        "scan_skipped",
-                        now=now.isoformat(),
-                        reason=window_reason,
-                        next_transition_local_iso=next_transition_local_iso,
-                        seconds_until_transition=seconds_until_transition,
-                        next_scan_in_seconds=next_scan_in_seconds,
-                    )
                 time.sleep(next_scan_in_seconds)
                 continue
 
