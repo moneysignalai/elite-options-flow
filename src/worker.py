@@ -309,6 +309,7 @@ def main():
             )
             is_dry_run = config.dry_run_ignore_market_window and not is_open
             if not run_scan:
+                # State transitions are already logged via market_window_* events.
                 time.sleep(next_scan_in_seconds)
                 continue
 
