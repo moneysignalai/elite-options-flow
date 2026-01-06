@@ -283,6 +283,14 @@ def main():
             next_scan_in_seconds = sleep_seconds(
                 outside=not is_open, interval=config.scan.scan_interval_seconds
             )
+            log.info(
+                "market_status",
+                is_open=is_open,
+                reason=window_reason,
+                next_transition_local_iso=next_transition_local_iso,
+                seconds_until_transition=seconds_until_transition,
+                next_scan_in_seconds=next_scan_in_seconds,
+            )
             current_state = (is_open, window_reason, next_transition_local_iso)
             state_changed = current_state != last_market_state
             market_event = "market_window_state_change" if state_changed else "market_window_check"
@@ -316,7 +324,7 @@ def main():
             scan_id = uuid.uuid4().hex[:8]
             set_run_id(scan_id)
             iteration_log = log.bind(run_id=scan_id, scan_id=scan_id)
-            scan_start = time.time()
+            scan_start = time.monotonic()
             tickers_scanned = 0
             triggered = 0
             errors = 0
@@ -374,7 +382,7 @@ def main():
                         reason="api_error",
                     )
                     errors += 1
-            duration_ms = int((time.time() - scan_start) * 1000)
+            duration_ms = int((time.monotonic() - scan_start) * 1000)
             log.info(
                 "scan_cycle_end",
                 scan_id=scan_id,
@@ -384,6 +392,14 @@ def main():
                 total_errors=errors,
                 dry_run=is_dry_run,
             )
+            if is_open:
+                log.info(
+                    "scan_rollup",
+                    tickers_scanned=tickers_scanned,
+                    total_alerts_sent=triggered,
+                    total_errors=errors,
+                    duration_ms=duration_ms,
+                )
             set_run_id(None)
             if is_dry_run:
                 dry_run_cycle_completed = True
